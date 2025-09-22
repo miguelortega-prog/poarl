@@ -37,6 +37,7 @@ class CreateNewUser implements CreatesNewUsers
             'password' => $this->passwordRules(),
 
             'role' => ['required', Rule::in([
+                'administrator',
                 'manager',
                 'director',
                 'teamLead',
@@ -48,16 +49,16 @@ class CreateNewUser implements CreatesNewUsers
             'supervisor_id' => ['nullable', 'exists:users,id'],
             'area_id'       => ['required', 'exists:areas,id'],
 
-            // Subdepartment requerido excepto para manager
+            // Subdepartment requerido excepto para manager y administrator
             'subdepartment_id' => [
-                Rule::requiredIf(fn () => $input['role'] !== 'manager'),
+                Rule::requiredIf(fn () => ! in_array($input['role'], ['manager', 'administrator'])),
                 'nullable',
                 'exists:subdepartments,id',
             ],
 
-            // Team requerido excepto para manager y director
+            // Team requerido excepto para manager, director y administrator
             'team_id' => [
-                Rule::requiredIf(fn () => ! in_array($input['role'], ['manager', 'director'])),
+                Rule::requiredIf(fn () => ! in_array($input['role'], ['manager', 'director', 'administrator'])),
                 'nullable',
                 'exists:teams,id',
             ],
