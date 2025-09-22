@@ -23,6 +23,8 @@ class CreateNewUser implements CreatesNewUsers
      */
     public function create(array $input): User
     {
+        $registerableRoles = config('roles.registerable', []);
+
         $validated = Validator::make($input, [
             'name' => ['required', 'string', 'max:255'],
             'email' => [
@@ -35,16 +37,7 @@ class CreateNewUser implements CreatesNewUsers
                 },
             ],
             'password' => $this->passwordRules(),
-
-            'role' => ['required', Rule::in([
-                'administrator',
-                'manager',
-                'director',
-                'teamLead',
-                'teamCoordinator',
-                'teamMember'
-            ])],
-
+            'role' => ['required', Rule::in($registerableRoles)],
             'position'      => ['required', 'string', 'max:100'],
             'supervisor_id' => ['nullable', 'exists:users,id'],
             'area_id'       => ['required', 'exists:areas,id'],

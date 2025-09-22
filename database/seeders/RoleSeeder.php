@@ -12,17 +12,25 @@ class RoleSeeder extends Seeder
      */
     public function run(): void
     {
-        $roles = [
-            'administrator',
-            'manager',
-            'director',
-            'teamLead',
-            'teamCoordinator',
-            'teamMember',
-        ];
-
-        foreach ($roles as $role) {
-            Role::firstOrCreate(['name' => $role]);
+        $roles = collect(config('roles.registerable', []));
+        if ($roles->isEmpty()) {
+            return;
         }
+
+        Role::query()
+            ->where('guard_name', 'web')
+            ->whereIn('name', $roles)
+            ->get()
+            ->groupBy('name')
+            ->each(static function ($group): void {
+                $group->skip(1)->each->delete();
+            });
+
+        $roles->each(static function (string $role): void {
+            Role::query()->updateOrCreate([
+                'name' => $role,
+                'guard_name' => 'web',
+            ]);
+        });
     }
 }

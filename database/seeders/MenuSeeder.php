@@ -39,10 +39,15 @@ class MenuSeeder extends Seeder
         );
 
         // Asociar roles
-        $roleNames = ['administrator', 'manager', 'director', 'teamLead', 'teamCoordinator', 'teamMember'];
-        $roles = Role::whereIn('name', $roleNames)->get()->keyBy('name');
+        $roleNames = config('roles.registerable', []);
+        $roles = Role::query()
+            ->where('guard_name', 'web')
+            ->whereIn('name', $roleNames)
+            ->get()
+            ->unique('name')
+            ->keyBy('name');
 
-        $permission = $comunicados->permission
+      $permission = $comunicados->permission
             ? Permission::firstOrCreate([
                 'name' => $comunicados->permission,
                 'guard_name' => 'web',
@@ -68,7 +73,9 @@ class MenuSeeder extends Seeder
                 $menu->roles()->syncWithoutDetaching([$administrator->id]);
             });
 
-            $administrator->syncPermissions(Permission::all());
+            $administrator->syncPermissions(
+                Permission::query()->where('guard_name', 'web')->get()
+            );
         }
     }
 }
