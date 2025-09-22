@@ -18,7 +18,16 @@
     <!-- Styles -->
     @livewireStyles
 </head>
-<body x-data="{ sidebarOpen: false }" class="font-sans antialiased bg-gray-100 dark:bg-gray-900">
+<body
+    x-data="{
+        sidebarOpen: false,
+    }"
+    x-on:toggle-sidebar.window="sidebarOpen = !sidebarOpen"
+    x-on:open-sidebar.window="sidebarOpen = true"
+    x-on:close-sidebar.window="sidebarOpen = false"
+    x-on:keydown.escape.window="sidebarOpen = false"
+    class="font-sans antialiased bg-gray-100 dark:bg-gray-900"
+>
 
     <x-banner />
 
@@ -26,11 +35,21 @@
     @livewire('navigation-menu')
 
     @php
-        $hasSidebar = isset($sidebar) && $sidebar instanceof \Illuminate\View\ComponentSlot && ! $sidebar->isEmpty();
+        $hasCustomSidebar = isset($sidebar)
+            && $sidebar instanceof \Illuminate\View\ComponentSlot
+            && ! $sidebar->isEmpty();
+
+        $defaultMenuTree = [];
+
+        if (! $hasCustomSidebar && auth()->check()) {
+            $defaultMenuTree = app(\App\Services\MenuBuilder::class)->buildForCurrentUser();
+        }
+
+        $shouldRenderSidebar = $hasCustomSidebar || auth()->check();
     @endphp
 
     {{-- Backdrop para el drawer móvil --}}
-    @if ($hasSidebar)
+    @if ($shouldRenderSidebar)
         <div
             x-cloak
             x-show="sidebarOpen"
@@ -41,31 +60,38 @@
 
     {{-- Contenedor principal empujado debajo del header --}}
     <div class="min-h-screen pt-16">
-        <div @class(['flex' => $hasSidebar])>
+        <div class="flex">
 
             {{-- Sidebar fijo: debajo del header, con drawer móvil --}}
-            @if ($hasSidebar)
+            @if ($shouldRenderSidebar)
                 <aside
                     class="fixed top-16 left-0 z-40 w-64 h-[calc(100vh-4rem)] overflow-y-auto
                            bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700
                            transform transition-transform duration-200 ease-in-out
-                           md:translate-x-0"
-                    :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'">
-                    {{ $sidebar }}
+                           -translate-x-full md:translate-x-0"
+                    :class="sidebarOpen ? 'translate-x-0' : ''">
+                    @if ($hasCustomSidebar)
+                        {{ $sidebar }}
+                    @else
+                        <div class="p-4 space-y-4">
+                            <p class="text-xs font-semibold tracking-wide text-gray-500 uppercase dark:text-gray-400">
+                                {{ __('Menú principal') }}
+                            </p>
+
+                            @if (count($defaultMenuTree) > 0)
+                                <x-sidebar-menu :menus="$defaultMenuTree" />
+                            @else
+                                <p class="text-sm text-gray-500 dark:text-gray-400">
+                                    {{ __('Todavía no tienes accesos asignados.') }}
+                                </p>
+                            @endif
+                        </div>
+                    @endif
                 </aside>
             @endif
 
             {{-- Contenido principal (margen para el aside en md+) --}}
-            <div @class(['w-full', 'flex-1 md:ml-64' => $hasSidebar])>
-                {{-- Top bar opcional (solo si quieres un botón hamburguesa adicional) --}}
-                @if ($hasSidebar)
-                    <div class="md:hidden bg-white dark:bg-gray-800 shadow px-4 py-2">
-                        <button @click="sidebarOpen = !sidebarOpen" class="text-gray-600 dark:text-gray-300">
-                            <i class="fas fa-bars"></i>
-                        </button>
-                    </div>
-                @endif
-
+            <div @class(['w-full', 'flex-1 md:ml-64' => $shouldRenderSidebar])>
                 {{-- Header opcional de página --}}
                 @if (isset($header))
                     <header class="bg-white dark:bg-gray-800 shadow">

@@ -1,27 +1,37 @@
 @props(['menus'])
 
-<nav>
-    <ul class="space-y-2">
+<nav aria-label="{{ __('Menú principal') }}">
+    <ul class="space-y-1">
         @foreach ($menus as $menu)
             <li x-data="{ open: false }">
-                <a href="{{ $menu->route ?? '#' }}" 
-                   @if($menu->children) @click.prevent="open = !open" @endif
-                   class="flex items-center p-2 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded">
-                    <i class="fas fa-{{ $menu->icon ?? 'circle' }} w-5"></i>
-                    <span class="ml-2">{{ $menu->name }}</span>
+                <a
+                    href="{{ $menu->route ?? '#' }}"
+                    target="_self"
                     @if($menu->children)
-                        <i :class="open ? 'fas fa-chevron-down ml-auto' : 'fas fa-chevron-right ml-auto'"></i>
+                        @click.prevent="open = !open"
+                        x-bind:aria-expanded="open"
+                        aria-haspopup="true"
+                    @endif
+                    class="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-gray-700 transition-colors duration-150 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-gray-800"
+                >
+                    <i class="fas fa-{{ $menu->icon ?? 'circle' }} w-5 shrink-0"></i>
+                    <span class="flex-1 text-left">{{ $menu->name }}</span>
+                    @if ($menu->children)
+                        <i :class="open ? 'fas fa-chevron-down' : 'fas fa-chevron-right'" class="ml-auto"></i>
                     @endif
                 </a>
 
-                @if($menu->children)
-                    <ul x-show="open" x-collapse class="ml-6 mt-2 space-y-1">
+                @if ($menu->children)
+                    <ul x-show="open" x-collapse class="ml-8 mt-2 space-y-1">
                         @foreach ($menu->children as $child)
                             <li>
-                                <a href="{{ $child->route }}" 
-                                   class="flex items-center p-2 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 rounded">
-                                    <i class="fas fa-{{ $child->icon ?? 'circle' }} w-4"></i>
-                                    <span class="ml-2">{{ $child->name }}</span>
+                                <a
+                                    href="{{ $child->route }}"
+                                    target="_self"
+                                    class="flex items-center gap-3 rounded-md px-3 py-2 text-sm text-gray-600 transition-colors duration-150 hover:bg-gray-200 dark:text-gray-300 dark:hover:bg-gray-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-gray-800"
+                                >
+                                    <i class="fas fa-{{ $child->icon ?? 'circle' }} w-4 shrink-0"></i>
+                                    <span>{{ $child->name }}</span>
                                 </a>
                             </li>
                         @endforeach
