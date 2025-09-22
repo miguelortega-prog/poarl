@@ -13,6 +13,7 @@
 
     <!-- Scripts -->
     @vite(['resources/css/app.css', 'resources/js/app.js'])
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
 
     <!-- Styles -->
     @livewireStyles
@@ -24,41 +25,46 @@
     {{-- Header Jetstream fijo arriba (≈ h-16) --}}
     @livewire('navigation-menu')
 
+    @php
+        $hasSidebar = isset($sidebar) && $sidebar instanceof \Illuminate\View\ComponentSlot && ! $sidebar->isEmpty();
+    @endphp
+
     {{-- Backdrop para el drawer móvil --}}
-    <div
-        x-show="sidebarOpen"
-        x-transition.opacity
-        @click="sidebarOpen = false"
-        class="fixed inset-0 z-30 bg-black/40 md:hidden"></div>
+    @if ($hasSidebar)
+        <div
+            x-cloak
+            x-show="sidebarOpen"
+            x-transition.opacity
+            @click="sidebarOpen = false"
+            class="fixed inset-0 z-30 bg-black/40 md:hidden"></div>
+    @endif
 
     {{-- Contenedor principal empujado debajo del header --}}
-    <div class="pt-16">
-        <div class="flex">
+    <div class="min-h-screen pt-16">
+        <div @class(['flex' => $hasSidebar])>
 
             {{-- Sidebar fijo: debajo del header, con drawer móvil --}}
-            <aside
-                class="fixed top-16 left-0 z-40 w-64 h-[calc(100vh-4rem)] overflow-y-auto
-                       bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700
-                       transform transition-transform duration-200 ease-in-out
-                       md:translate-x-0"
-                :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'">
-
-                <div class="p-4">
-                    @php
-                        $menus = app(\App\Services\MenuBuilder::class)->buildForCurrentUser();
-                    @endphp
-                    <x-sidebar-menu :menus="$menus"/>
-                </div>
-            </aside>
+            @if ($hasSidebar)
+                <aside
+                    class="fixed top-16 left-0 z-40 w-64 h-[calc(100vh-4rem)] overflow-y-auto
+                           bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700
+                           transform transition-transform duration-200 ease-in-out
+                           md:translate-x-0"
+                    :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'">
+                    {{ $sidebar }}
+                </aside>
+            @endif
 
             {{-- Contenido principal (margen para el aside en md+) --}}
-            <div class="flex-1 md:ml-64 w-full">
+            <div @class(['w-full', 'flex-1 md:ml-64' => $hasSidebar])>
                 {{-- Top bar opcional (solo si quieres un botón hamburguesa adicional) --}}
-                <div class="md:hidden bg-white dark:bg-gray-800 shadow px-4 py-2">
-                    <button @click="sidebarOpen = !sidebarOpen" class="text-gray-600 dark:text-gray-300">
-                        <i class="fas fa-bars"></i>
-                    </button>
-                </div>
+                @if ($hasSidebar)
+                    <div class="md:hidden bg-white dark:bg-gray-800 shadow px-4 py-2">
+                        <button @click="sidebarOpen = !sidebarOpen" class="text-gray-600 dark:text-gray-300">
+                            <i class="fas fa-bars"></i>
+                        </button>
+                    </div>
+                @endif
 
                 {{-- Header opcional de página --}}
                 @if (isset($header))
@@ -77,6 +83,7 @@
         </div>
     </div>
     <script src="https://kit.fontawesome.com/8ce750f5df.js" crossorigin="anonymous"></script>
+    @stack('modals')
     @livewireScripts
 </body>
 </html>
