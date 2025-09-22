@@ -36,21 +36,27 @@ class JetstreamServiceProvider extends ServiceProvider
         Livewire::component('profile.update-profile-information-form', ProfileUpdateProfileInformationForm::class);
 
         View::composer('auth.register', function ($view) {
-            $registerableRoles = config('roles.registerable', []);
+            $registerableRoles = collect(config('roles.registerable', []))
+                ->filter(static fn ($role) => is_string($role) && $role !== '')
+                ->unique()
+                ->values();
 
-            $roles = Role::query()
+            $roleRecords = Role::query()
                 ->where('guard_name', 'web')
                 ->whereIn('name', $registerableRoles)
                 ->get()
-                ->unique('name')
-                ->values();
+                ->keyBy('name');
 
-            if (! empty($registerableRoles)) {
-                $orderMap = array_flip($registerableRoles);
-                $roles = $roles->sortBy(static fn (Role $role) => $orderMap[$role->name] ?? PHP_INT_MAX)->values();
-            }
+            $roles = $registerableRoles->map(static function (string $roleName) use ($roleRecords) {
+                $role = $roleRecords->get($roleName);
 
-            $view->with('roles', $roles);
+                return [
+                    'id' => $role ? $role->getKey() : $roleName,
+                    'name' => $roleName,
+                ];
+            });
+
+            $view->with('roles', $roles->values());
             $view->with('areas', Area::all());
             $view->with('subdepartments', Subdepartment::all());
             $view->with('teams', Team::all());
