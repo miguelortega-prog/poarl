@@ -6,10 +6,12 @@ use App\Actions\Jetstream\DeleteUser;
 use Illuminate\Support\ServiceProvider;
 use Laravel\Jetstream\Jetstream;
 use Illuminate\Support\Facades\View;
+use Livewire\Livewire;
 use Spatie\Permission\Models\Role;
 use App\Models\Area;
 use App\Models\Subdepartment;
 use App\Models\Team;
+use App\Livewire\Profile\UpdateProfileInformationForm as ProfileUpdateProfileInformationForm;
 
 
 class JetstreamServiceProvider extends ServiceProvider
@@ -30,6 +32,8 @@ class JetstreamServiceProvider extends ServiceProvider
         $this->configurePermissions();
 
         Jetstream::deleteUsersUsing(DeleteUser::class);
+
+        Livewire::component('profile.update-profile-information-form', ProfileUpdateProfileInformationForm::class);
 
         View::composer('auth.register', function ($view) {
             $registerableRoles = config('roles.registerable', []);

@@ -8,6 +8,21 @@
     </x-slot>
 
     <x-slot name="form">
+        @php
+            $selectedRole = $state['role'] ?? null;
+            $selectedAreaId = $state['area_id'] ?? null;
+            $selectedSubdepartmentId = $state['subdepartment_id'] ?? null;
+
+            $availableSubdepartments = collect($availableSubdepartments ?? []);
+            $availableTeams = collect($availableTeams ?? []);
+
+            $showSubdepartment = $selectedRole && ! in_array($selectedRole, ['manager', 'administrator']);
+            $showTeam = $selectedRole && ! in_array($selectedRole, ['manager', 'director', 'administrator']);
+
+            $filteredSubdepartments = $availableSubdepartments->where('area_id', $selectedAreaId);
+            $filteredTeams = $availableTeams->where('subdepartment_id', $selectedSubdepartmentId);
+        @endphp
+
         <!-- Profile Photo -->
         @if (Laravel\Jetstream\Jetstream::managesProfilePhotos())
             <div x-data="{photoName: null, photoPreview: null}" class="col-span-6 sm:col-span-4">
@@ -53,16 +68,16 @@
         @endif
 
         <!-- Name -->
-        <div class="col-span-6 sm:col-span-4">
+        <div class="col-span-6 sm:col-span-3">
             <x-label for="name" value="{{ __('Name') }}" />
             <x-input id="name" type="text" class="mt-1 block w-full" wire:model="state.name" required autocomplete="name" />
             <x-input-error for="name" class="mt-2" />
         </div>
 
         <!-- Email -->
-        <div class="col-span-6 sm:col-span-4">
+        <div class="col-span-6 sm:col-span-3">
             <x-label for="email" value="{{ __('Email') }}" />
-            <x-input id="email" type="email" class="mt-1 block w-full" wire:model="state.email" required autocomplete="username" />
+            <x-input id="email" type="email" class="mt-1 block w-full" wire:model="state.email" autocomplete="username" disabled />
             <x-input-error for="email" class="mt-2" />
 
             @if (Laravel\Fortify\Features::enabled(Laravel\Fortify\Features::emailVerification()) && ! $this->user->hasVerifiedEmail())
@@ -81,6 +96,65 @@
                 @endif
             @endif
         </div>
+
+        <!-- Position -->
+        <div class="col-span-6 sm:col-span-3">
+            <x-label for="position" value="{{ __('Cargo') }}" />
+            <x-input id="position" type="text" class="mt-1 block w-full" wire:model="state.position" autocomplete="organization-title" />
+            <x-input-error for="position" class="mt-2" />
+        </div>
+
+        <!-- Role -->
+        <div class="col-span-6 sm:col-span-3">
+            <x-label for="role" value="{{ __('Role') }}" />
+            <select id="role" wire:model.live="state.role" class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300">
+                <option value="" disabled>-- Selecciona un rol --</option>
+                @foreach ($availableRoles ?? [] as $role)
+                    <option value="{{ $role['name'] }}">{{ $role['name'] }}</option>
+                @endforeach
+            </select>
+            <x-input-error for="role" class="mt-2" />
+        </div>
+
+        <!-- Area -->
+        <div class="col-span-6 sm:col-span-3">
+            <x-label for="area_id" value="{{ __('Área') }}" />
+            <select id="area_id" wire:model.live="state.area_id" class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300">
+                <option value="" disabled>-- Selecciona un área --</option>
+                @foreach ($availableAreas ?? [] as $area)
+                    <option value="{{ $area['id'] }}">{{ $area['name'] }}</option>
+                @endforeach
+            </select>
+            <x-input-error for="area_id" class="mt-2" />
+        </div>
+
+        <!-- Subdepartment -->
+        @if ($showSubdepartment)
+            <div class="col-span-6 sm:col-span-3">
+                <x-label for="subdepartment_id" value="{{ __('Subdepartamento') }}" />
+                <select id="subdepartment_id" wire:model.live="state.subdepartment_id" class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300">
+                    <option value="" disabled>-- Selecciona un subdepartamento --</option>
+                    @foreach ($filteredSubdepartments as $subdepartment)
+                        <option value="{{ $subdepartment['id'] }}">{{ $subdepartment['name'] }}</option>
+                    @endforeach
+                </select>
+                <x-input-error for="subdepartment_id" class="mt-2" />
+            </div>
+        @endif
+
+        <!-- Team -->
+        @if ($showTeam)
+            <div class="col-span-6 sm:col-span-3">
+                <x-label for="team_id" value="{{ __('Equipo') }}" />
+                <select id="team_id" wire:model.live="state.team_id" class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300">
+                    <option value="" disabled>-- Selecciona un equipo --</option>
+                    @foreach ($filteredTeams as $team)
+                        <option value="{{ $team['id'] }}">{{ $team['name'] }}</option>
+                    @endforeach
+                </select>
+                <x-input-error for="team_id" class="mt-2" />
+            </div>
+        @endif
     </x-slot>
 
     <x-slot name="actions">
