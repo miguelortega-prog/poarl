@@ -47,7 +47,7 @@ class MenuSeeder extends Seeder
             ->unique('name')
             ->keyBy('name');
 
-        $permission = $comunicados->permission
+      $permission = $comunicados->permission
             ? Permission::firstOrCreate([
                 'name' => $comunicados->permission,
                 'guard_name' => 'web',

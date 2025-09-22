@@ -37,9 +37,7 @@ class CreateNewUser implements CreatesNewUsers
                 },
             ],
             'password' => $this->passwordRules(),
-
             'role' => ['required', Rule::in($registerableRoles)],
-
             'position'      => ['required', 'string', 'max:100'],
             'supervisor_id' => ['nullable', 'exists:users,id'],
             'area_id'       => ['required', 'exists:areas,id'],

@@ -13,7 +13,6 @@ class RoleSeeder extends Seeder
     public function run(): void
     {
         $roles = collect(config('roles.registerable', []));
-
         if ($roles->isEmpty()) {
             return;
         }
