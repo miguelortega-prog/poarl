@@ -32,11 +32,31 @@ class JetstreamServiceProvider extends ServiceProvider
         Jetstream::deleteUsersUsing(DeleteUser::class);
 
         View::composer('auth.register', function ($view) {
-            $view->with('roles', Role::all());
+            $registerableRoles = collect(config('roles.registerable', []))
+                ->filter(static fn ($role) => is_string($role) && $role !== '')
+                ->unique()
+                ->values();
+
+            $roleRecords = Role::query()
+                ->where('guard_name', 'web')
+                ->whereIn('name', $registerableRoles)
+                ->get()
+                ->keyBy('name');
+
+            $roles = $registerableRoles->map(static function (string $roleName) use ($roleRecords) {
+                $role = $roleRecords->get($roleName);
+
+                return [
+                    'id' => $role ? $role->getKey() : $roleName,
+                    'name' => $roleName,
+                ];
+            });
+
+            $view->with('roles', $roles->values());
             $view->with('areas', Area::all());
             $view->with('subdepartments', Subdepartment::all());
             $view->with('teams', Team::all());
-        });        
+        });
     }
 
     /**

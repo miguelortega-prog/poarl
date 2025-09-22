@@ -139,10 +139,10 @@
                 errors: {},
 
                 get showSubdepartment() {
-                    return this.role && this.role !== 'manager';
+                    return this.role && !['manager', 'administrator'].includes(this.role);
                 },
                 get showTeam() {
-                    return this.role && !['manager', 'director'].includes(this.role);
+                    return this.role && !['manager', 'director', 'administrator'].includes(this.role);
                 },
                 get filteredSubdepartments() {
                     if (!this.area_id) return [];
@@ -178,7 +178,7 @@
                             break;
 
                         case 'role':
-                            const validRoles = ['manager','director','teamLead','teamCoordinator','teamMember'];
+                            const validRoles = this.roles.map(r => r.name);
                             if (!this.role) this.errors.role = 'Debe seleccionar un rol';
                             else if (!validRoles.includes(this.role)) {
                                 this.errors.role = 'Rol inválido';
