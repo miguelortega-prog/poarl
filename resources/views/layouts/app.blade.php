@@ -54,6 +54,8 @@
 
         {{-- Contenido principal --}}
         <main class="w-full desktop:col-start-2 p-4">
+            <x-layout.breadcrumbs />
+
             {{ $slot }}
         </main>
     </div>
