@@ -60,15 +60,15 @@
 
     {{-- Contenedor principal empujado debajo del header --}}
     <div class="min-h-screen pt-16">
-        <div class="flex">
+        <div class="flex min-h-[calc(100vh-4rem)]">
 
             {{-- Sidebar fijo: debajo del header, con drawer móvil --}}
             @if ($shouldRenderSidebar)
                 <aside
                     class="fixed top-16 left-0 z-40 w-64 h-[calc(100vh-4rem)] overflow-y-auto
-                           bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700
-                           transform transition-transform duration-200 ease-in-out
-                           -translate-x-full md:translate-x-0"
+                           bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 md:border-r
+                           transform transition-transform duration-200 ease-in-out flex-shrink-0
+                           -translate-x-full md:translate-x-0 md:sticky md:top-16 md:h-[calc(100vh-4rem)] md:self-stretch"
                     :class="sidebarOpen ? 'translate-x-0' : ''">
                     @if ($hasCustomSidebar)
                         {{ $sidebar }}
@@ -91,7 +91,7 @@
             @endif
 
             {{-- Contenido principal (margen para el aside en md+) --}}
-            <div @class(['w-full', 'flex-1 md:ml-64' => $shouldRenderSidebar])>
+            <div @class(['w-full flex-1'])>
                 {{-- Header opcional de página --}}
                 @if (isset($header))
                     <header class="bg-white dark:bg-gray-800 shadow">
