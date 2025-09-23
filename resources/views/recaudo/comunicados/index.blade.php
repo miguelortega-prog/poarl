@@ -9,7 +9,7 @@
         <div class="max-w-7xl mx-auto sm:px-6 lg:px-8">
             <div class="bg-white dark:bg-gray-800 overflow-hidden shadow-xl sm:rounded-lg p-6">
                 <p class="text-gray-700 dark:text-gray-300">
-                    Aquí irá la lógica de carga y cruce de archivos CSV 📂.
+                    Hola mundo
                 </p>
             </div>
         </div>
