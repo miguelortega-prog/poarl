@@ -18,5 +18,10 @@ class DatabaseSeeder extends Seeder
         $this->call(SubdepartmentSeeder::class);
         $this->call(TeamSeeder::class);
         $this->call(MenuSeeder::class);
+        $this->call([
+            CollectionNoticeTypeSeeder::class,
+            NoticeDataSourceSeeder::class,
+            CollectionNoticeTypeDataSourceSeeder::class,
+        ]);
     }
 }
