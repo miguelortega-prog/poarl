@@ -9,7 +9,9 @@
         <div class="max-w-7xl mx-auto sm:px-6 lg:px-8">
             <div class="bg-white dark:bg-gray-800 overflow-hidden shadow-xl sm:rounded-lg p-6">
                 <p class="text-gray-700 dark:text-gray-300">
-                    Hola mundo
+                    <div class="w-full p-4 bg-primary-900">
+                        Hola mundo <h1 class="text-h1 desktop:font-bold text-primary-100">Título</h1>
+                    </div>
                 </p>
             </div>
         </div>
