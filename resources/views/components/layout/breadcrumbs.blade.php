@@ -10,12 +10,25 @@
 
         $label = (string) \Illuminate\Support\Str::of($segment)
             ->replace(['-', '_'], ' ')
-            ->lower()
-            ->ucwords();
+            ->title();
+
+        $isNavigable = false;
+
+        try {
+            \Illuminate\Support\Facades\Route::getRoutes()->match(
+                \Illuminate\Http\Request::create($accumulatedPath)
+            );
+
+            $isNavigable = true;
+        } catch (\Symfony\Component\HttpKernel\Exception\NotFoundHttpException|
+            \Symfony\Component\HttpKernel\Exception\MethodNotAllowedHttpException $exception) {
+            $isNavigable = false;
+        }
 
         $breadcrumbs[] = [
             'label' => $label,
             'url' => url($accumulatedPath),
+            'isNavigable' => $isNavigable,
         ];
     }
 @endphp
@@ -36,10 +49,14 @@
                     <span class="font-semibold text-gray-900 dark:text-gray-100">
                         {{ $crumb['label'] }}
                     </span>
-                @else
+                @elseif ($crumb['isNavigable'])
                     <a href="{{ $crumb['url'] }}" class="font-medium transition hover:text-primary-700">
                         {{ $crumb['label'] }}
                     </a>
+                @else
+                    <span class="font-medium text-gray-900 dark:text-gray-100">
+                        {{ $crumb['label'] }}
+                    </span>
                 @endif
             </li>
         @endforeach
