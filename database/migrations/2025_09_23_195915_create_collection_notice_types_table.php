@@ -15,6 +15,11 @@ return new class extends Migration
             $table->id();
             $table->string('code')->unique();
             $table->string('name')->unique();
+            $table->enum('period', [
+                'today-2',
+                'write',
+                'all',
+                ])->default('today-2');   
             $table->timestamps();
         });
     }

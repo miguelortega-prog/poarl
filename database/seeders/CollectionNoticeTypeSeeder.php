@@ -14,16 +14,16 @@ class CollectionNoticeTypeSeeder extends Seeder
     public function run(): void
     {
         $types = [
-            ['name' => 'CONSTITUCIÓN EN MORA - APORTANTES', 'code' => 'CMA'],
-            ['name' => 'CONSTITUCIÓN EN MORA - INDEPENDIENTES', 'code' => 'CMI'],
-            ['name' => 'AVISO DE INCUMPLIMIENTO - APORTANTES', 'code' => 'AIA'],
-            ['name' => 'AVISO DE INCUMPLIMIENTO POR INCONSISTENCIAS', 'code' => 'AIINCO'],
-            ['name' => 'AVISO DE INCUMPLIMIENTO POR ESTADOS DE CUENTA', 'code' => 'AIESTA'],
-            ['name' => 'AVISO DE INCUMPLIMIENTO - INDEPENDIENTES', 'code' => 'AIINDE'],
-            ['name' => 'AVISO AL MINISTERIO - APORTANTES', 'code' => 'AIMIN'],
-            ['name' => 'TÍTULO EJECUTIVO - APORTANTES', 'code' => 'TEA'],
-            ['name' => 'PRIMERA ACCIÓN PERSUASIVA - APORTANTES', 'code' => 'PAP'],
-            ['name' => 'SEGUNDA ACCIÓN PERSUASIVA -  APORTANTES', 'code' => 'SAP'],
+            ['name' => 'CONSTITUCIÓN EN MORA - APORTANTES', 'code' => 'CMA', 'period' => 'today-2'],
+            ['name' => 'CONSTITUCIÓN EN MORA - INDEPENDIENTES', 'code' => 'CMI', 'period' => 'today-2'],
+            ['name' => 'AVISO DE INCUMPLIMIENTO - APORTANTES', 'code' => 'AIA', 'period' => 'today-2'],
+            ['name' => 'AVISO DE INCUMPLIMIENTO POR INCONSISTENCIAS', 'code' => 'AIINCO', 'period' => 'today-2'],
+            ['name' => 'AVISO DE INCUMPLIMIENTO POR ESTADOS DE CUENTA', 'code' => 'AIESTA', 'period' => 'today-2'],
+            ['name' => 'AVISO DE INCUMPLIMIENTO - INDEPENDIENTES', 'code' => 'AIINDE', 'period' => 'today-2'],
+            ['name' => 'AVISO AL MINISTERIO - APORTANTES', 'code' => 'AIMIN', 'period' => 'write'],
+            ['name' => 'TÍTULO EJECUTIVO - APORTANTES', 'code' => 'TEA', 'period' => 'all'],
+            ['name' => 'PRIMERA ACCIÓN PERSUASIVA - APORTANTES', 'code' => 'PAP', 'period' => 'all'],
+            ['name' => 'SEGUNDA ACCIÓN PERSUASIVA -  APORTANTES', 'code' => 'SAP', 'period' => 'all'],
         ];
 
         foreach ($types as $t) {

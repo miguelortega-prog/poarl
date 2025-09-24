@@ -13,6 +13,7 @@ return new class extends Migration
             $table->string('code', 32)->unique();
             $table->string('name');
             $table->unsignedInteger('num_columns')->default(0);
+            $table->string('extension')->default('csv');
             $table->timestampsTz();
         });
     }
