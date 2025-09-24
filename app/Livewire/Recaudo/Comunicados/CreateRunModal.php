@@ -4,7 +4,9 @@ namespace App\Livewire\Recaudo\Comunicados;
 
 use App\Models\CollectionNoticeType;
 use Illuminate\Contracts\View\View;
+use Livewire\Attributes\On;
 use Livewire\Component;
+use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 use Livewire\WithFileUploads;
 
 class CreateRunModal extends Component
@@ -30,11 +32,17 @@ class CreateRunModal extends Component
      */
     public array $files = [];
 
-    /**
-     * @var array<int, string>
-     */
-    protected $listeners = [
-        'openCreateRunModal' => 'handleOpenCreateRunModal',
+    protected array $messages = [
+        'typeId.required' => 'Selecciona un tipo de comunicado.',
+        'typeId.exists' => 'Selecciona un tipo de comunicado válido.',
+        'files.*.required' => 'Debes adjuntar el archivo correspondiente a este insumo.',
+        'files.*.file' => 'Adjunta un archivo válido.',
+        'files.*.mimes' => 'Solo se permiten archivos en formato CSV o Excel.',
+    ];
+
+    protected array $validationAttributes = [
+        'typeId' => 'tipo de comunicado',
+        'files.*' => 'insumo requerido',
     ];
 
     public function mount(): void
@@ -45,24 +53,42 @@ class CreateRunModal extends Component
             ->toArray();
     }
 
-    public function updatedTypeId(): void
+    public function updatedTypeId($value): void
     {
-        $this->dataSources = CollectionNoticeType::query()
-            ->with(['dataSources' => fn ($query) => $query->orderBy('name')])
-            ->find($this->typeId)
-            ?->dataSources
-            ->map(fn ($dataSource) => $dataSource->only(['id', 'name', 'code']))
+        $this->resetValidation();
+        $this->files = [];
+
+        $this->dataSources = [];
+
+        if (! filled($value)) {
+            return;
+        }
+
+        $type = CollectionNoticeType::query()
+            ->with(['dataSources' => function ($query) {
+                $query
+                    ->select('notice_data_sources.id', 'notice_data_sources.name', 'notice_data_sources.code')
+                    ->orderBy('notice_data_sources.name');
+            }])
+            ->select('collection_notice_types.id')
+            ->find($value);
+
+        $this->dataSources = $type?->dataSources
+            ->map(fn ($dataSource) => [
+                'id' => $dataSource->id,
+                'name' => $dataSource->name,
+                'code' => $dataSource->code,
+            ])
             ->values()
             ->all() ?? [];
-
-        $this->files = [];
     }
 
     public function getIsFormValidProperty(): bool
     {
         return filled($this->typeId)
             && count($this->dataSources) > 0
-            && $this->allFilesSelected();
+            && $this->allFilesSelected()
+            && $this->getErrorBag()->isEmpty();
     }
 
     protected function allFilesSelected(): bool
@@ -74,7 +100,9 @@ class CreateRunModal extends Component
         foreach ($this->dataSources as $dataSource) {
             $key = (string) ($dataSource['id'] ?? '');
 
-            if ($key === '' || ! array_key_exists($key, $this->files) || blank($this->files[$key] ?? null)) {
+            $file = $this->files[$key] ?? null;
+
+            if ($key === '' || ! $file instanceof TemporaryUploadedFile) {
                 return false;
             }
         }
@@ -82,10 +110,57 @@ class CreateRunModal extends Component
         return true;
     }
 
+    public function updatedOpen(bool $value): void
+    {
+        if (! $value) {
+            $this->reset(['typeId', 'dataSources', 'files']);
+            $this->resetValidation();
+        }
+    }
+
+    public function updated($propertyName): void
+    {
+        if ($propertyName === 'typeId') {
+            $this->validateOnly('typeId');
+
+            return;
+        }
+
+        if (str_starts_with($propertyName, 'files.')) {
+            $this->validateOnly($propertyName);
+        }
+    }
+
+    protected function rules(): array
+    {
+        $rules = [
+            'typeId' => ['required', 'integer', 'exists:collection_notice_types,id'],
+        ];
+
+        foreach ($this->dataSources as $dataSource) {
+            $rules['files.' . $dataSource['id']] = ['required', 'file', 'mimes:csv,xls,xlsx'];
+        }
+
+        return $rules;
+    }
+
+    #[On('openCreateRunModal')]
     public function handleOpenCreateRunModal(): void
     {
         $this->reset(['typeId', 'dataSources', 'files']);
+        $this->resetValidation();
         $this->open = true;
+    }
+
+    public function cancel(): void
+    {
+        $this->reset(['open', 'typeId', 'dataSources', 'files']);
+        $this->resetValidation();
+    }
+
+    public function submit(): void
+    {
+        $this->validate();
     }
 
     public function render(): View

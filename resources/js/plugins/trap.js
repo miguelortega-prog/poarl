@@ -6,12 +6,29 @@ const focusableSelectors = [
     'textarea:not([disabled]):not([tabindex="-1"])',
     'button:not([disabled]):not([tabindex="-1"])',
     '[tabindex]:not([tabindex="-1"])',
+    '[contenteditable]:not([contenteditable="false"])',
 ].join(',');
 
 const collectFocusable = (root) => {
-    return Array.from(root.querySelectorAll(focusableSelectors)).filter(
-        (element) => ! element.hasAttribute('disabled') && ! element.getAttribute('aria-hidden')
-    );
+    if (! root) {
+        return [];
+    }
+
+    return Array.from(root.querySelectorAll(focusableSelectors)).filter((element) => {
+        if (element.hasAttribute('disabled')) {
+            return false;
+        }
+
+        const style = window.getComputedStyle(element);
+
+        return ! element.hasAttribute('aria-hidden')
+            && style.display !== 'none'
+            && style.visibility !== 'hidden';
+    });
+};
+
+const findTrapRoot = (el) => {
+    return el.closest('.jetstream-modal') ?? el;
 };
 
 document.addEventListener('alpine:init', () => {
@@ -21,15 +38,43 @@ document.addEventListener('alpine:init', () => {
         return;
     }
 
-    Alpine.directive('trap', (el, { expression, modifiers }, { cleanup, effect, evaluateLater }) => {
+    Alpine.directive('trap', (el, { modifiers, expression }, { cleanup, effect, evaluateLater }) => {
         const evaluate = evaluateLater(expression);
 
         let active = false;
-        let previousFocused = null;
         let releaseInert = () => {};
         let releaseNoScroll = () => {};
+        let restoreTabIndex = () => {};
 
-        const enforceFocus = (event) => {
+        const trapRoot = findTrapRoot(el);
+
+        const ensureFocusableContainer = () => {
+            if (el.hasAttribute('tabindex')) {
+                return;
+            }
+
+            el.setAttribute('tabindex', '-1');
+
+            restoreTabIndex = () => {
+                el.removeAttribute('tabindex');
+            };
+        };
+
+        const focusFirstElement = () => {
+            const focusable = collectFocusable(el);
+
+            if (focusable.length > 0) {
+                focusable[0].focus({ preventScroll: true });
+
+                return;
+            }
+
+            if (el instanceof HTMLElement) {
+                el.focus({ preventScroll: true });
+            }
+        };
+
+        const handleFocusIn = (event) => {
             if (! active) {
                 return;
             }
@@ -38,13 +83,7 @@ document.addEventListener('alpine:init', () => {
                 return;
             }
 
-            const focusable = collectFocusable(el);
-
-            if (focusable.length === 0) {
-                return;
-            }
-
-            focusable[0].focus({ preventScroll: true });
+            focusFirstElement();
         };
 
         const handleKeydown = (event) => {
@@ -56,6 +95,8 @@ document.addEventListener('alpine:init', () => {
 
             if (focusable.length === 0) {
                 event.preventDefault();
+                focusFirstElement();
+
                 return;
             }
 
@@ -79,12 +120,13 @@ document.addEventListener('alpine:init', () => {
         };
 
         const applyInert = () => {
-            if (! modifiers.includes('inert')) {
+            if (! modifiers.includes('inert') || ! trapRoot?.parentElement) {
                 return () => {};
             }
 
-            const siblings = Array.from(document.body.children).filter((child) => ! child.contains(el));
-            siblings.forEach((sibling) => sibling.setAttribute('inert', ''));
+            const siblings = Array.from(trapRoot.parentElement.children).filter((child) => child !== trapRoot);
+
+            siblings.forEach((sibling) => sibling.setAttribute('inert', 'true'));
 
             return () => {
                 siblings.forEach((sibling) => sibling.removeAttribute('inert'));
@@ -98,13 +140,12 @@ document.addEventListener('alpine:init', () => {
 
             const originalOverflow = document.documentElement.style.overflow;
             const originalPaddingRight = document.documentElement.style.paddingRight;
-
-            const scrollBarWidth = window.innerWidth - document.documentElement.clientWidth;
+            const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
 
             document.documentElement.style.overflow = 'hidden';
 
-            if (scrollBarWidth > 0) {
-                document.documentElement.style.paddingRight = `${scrollBarWidth}px`;
+            if (scrollbarWidth > 0) {
+                document.documentElement.style.paddingRight = `${scrollbarWidth}px`;
             }
 
             return () => {
@@ -119,20 +160,16 @@ document.addEventListener('alpine:init', () => {
             }
 
             active = true;
-            previousFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+
+            ensureFocusableContainer();
 
             releaseInert = applyInert();
             releaseNoScroll = applyNoScroll();
 
-            document.addEventListener('focusin', enforceFocus, true);
+            document.addEventListener('focusin', handleFocusIn, true);
             el.addEventListener('keydown', handleKeydown, true);
 
-            const focusable = collectFocusable(el);
-            if (focusable.length > 0) {
-                focusable[0].focus({ preventScroll: true });
-            } else {
-                el.focus({ preventScroll: true });
-            }
+            queueMicrotask(focusFirstElement);
         };
 
         const deactivate = () => {
@@ -142,15 +179,16 @@ document.addEventListener('alpine:init', () => {
 
             active = false;
 
-            document.removeEventListener('focusin', enforceFocus, true);
+            document.removeEventListener('focusin', handleFocusIn, true);
             el.removeEventListener('keydown', handleKeydown, true);
 
             releaseInert();
             releaseNoScroll();
+            restoreTabIndex();
 
-            if (previousFocused && previousFocused.focus) {
-                previousFocused.focus({ preventScroll: true });
-            }
+            releaseInert = () => {};
+            releaseNoScroll = () => {};
+            restoreTabIndex = () => {};
         };
 
         effect(() => {
