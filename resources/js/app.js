@@ -1,10 +1,17 @@
 import './bootstrap';
 import '../css/app.css';
-import Alpine from 'alpinejs';
-import collapse from '@alpinejs/collapse'; // Importa el plugin
 
-window.Alpine = Alpine;
+import collapse from '@alpinejs/collapse';
+import './plugins/trap';
 
-Alpine.plugin(collapse); // Registra el plugin
+window.deferLoadingAlpine = (callback) => {
+    document.addEventListener('livewire:init', callback, { once: true });
+};
 
-Alpine.start();
+document.addEventListener('alpine:init', () => {
+    if (! window.Alpine) {
+        return;
+    }
+
+    window.Alpine.plugin(collapse);
+});

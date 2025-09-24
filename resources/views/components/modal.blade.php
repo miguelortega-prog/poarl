@@ -13,116 +13,18 @@ $availableMaxWidths = [
 ];
 
 $maxWidth = $availableMaxWidths[$maxWidth ?? '2xl'] ?? $availableMaxWidths['2xl'];
-
-$wireModel = $attributes->wire('model');
-$modelProperty = $wireModel ? (string) $wireModel : null;
 @endphp
 
 <div
-    x-data="{
-        show: false,
-        property: @js($modelProperty),
-        componentId: null,
-        watchRegistered: false,
-        commitHookBound: false,
-        livewireComponent() {
-            if (! this.property) {
-                return null;
-            }
-
-            if (this.componentId && window.Livewire) {
-                return window.Livewire.find(this.componentId);
-            }
-
-            const root = this.$el.closest('[wire\\:id]');
-
-            if (! root || ! window.Livewire) {
-                return null;
-            }
-
-            this.componentId = root.getAttribute('wire:id');
-
-            return this.componentId ? window.Livewire.find(this.componentId) : null;
-        },
-        syncFromLivewire() {
-            const component = this.livewireComponent();
-
-            if (! component || ! this.property) {
-                return;
-            }
-
-            this.show = Boolean(component.get(this.property));
-        },
-        init() {
-            if (! this.property) {
-                return;
-            }
-
-            const bind = () => {
-                const component = this.livewireComponent();
-
-                if (! component) {
-                    requestAnimationFrame(bind);
-                    return;
-                }
-
-                this.syncFromLivewire();
-
-                if (! this.watchRegistered) {
-                    this.$watch('show', (value) => {
-                        const currentComponent = this.livewireComponent();
-
-                        if (! currentComponent || ! this.property) {
-                            return;
-                        }
-
-                        const current = Boolean(currentComponent.get(this.property));
-                        const next = Boolean(value);
-
-                        if (current === next) {
-                            return;
-                        }
-
-                        currentComponent.set(this.property, next);
-                    });
-
-                    this.watchRegistered = true;
-                }
-
-                if (window.Livewire && typeof window.Livewire.hook === 'function' && ! this.commitHookBound) {
-                    window.Livewire.hook('commit', (payload, component) => {
-                        const target = component || (payload && payload.component) || null;
-
-                        if (! target || target.id !== this.componentId) {
-                            return;
-                        }
-
-                        this.syncFromLivewire();
-                    });
-
-                    this.commitHookBound = true;
-                }
-            };
-
-            if (window.Livewire) {
-                bind();
-            } else {
-                document.addEventListener('livewire:init', bind, { once: true });
-            }
-        },
-        close() {
-            this.show = false;
-        },
-    }"
-    x-on:close.stop="close()"
-    x-on:keydown.escape.window="close()"
+    x-data="{ show: @entangle($attributes->wire('model')) }"
+    x-on:close.stop="show = false"
+    x-on:keydown.escape.window="show = false"
     x-show="show"
-    x-cloak
     id="{{ $id }}"
     class="jetstream-modal fixed inset-0 overflow-y-auto px-4 py-6 sm:px-0 z-50"
     style="display: none;"
 >
-    <div x-show="show" class="fixed inset-0 transform transition-all" x-on:click="close()" x-transition:enter="ease-out duration-300"
+    <div x-show="show" class="fixed inset-0 transform transition-all" x-on:click="show = false" x-transition:enter="ease-out duration-300"
                     x-transition:enter-start="opacity-0"
                     x-transition:enter-end="opacity-100"
                     x-transition:leave="ease-in duration-200"
