@@ -77,14 +77,6 @@
                                 @foreach ($dataSources as $dataSource)
                                     @php($fileKey = (string) ($dataSource['id'] ?? ''))
                                     @php($selectedFile = $fileKey !== '' ? ($files[$fileKey] ?? null) : null)
-                                    @php($extension = strtolower($dataSource['extension'] ?? ''))
-                                    @php($accept = match ($extension) {
-                                        'csv' => '.csv',
-                                        'xls' => '.xls',
-                                        'xlsx' => '.xlsx,.xls',
-                                        default => '.csv,.xlsx,.xls',
-                                    })
-
                                     <div wire:key="data-source-{{ $dataSource['id'] }}" class="grid grid-cols-12 items-start gap-3 py-4 text-sm text-gray-700 dark:text-gray-200">
                                         <div class="col-span-12 space-y-1 text-sm tablet:col-span-6 desktop:col-span-6">
                                             <p class="font-semibold text-gray-900 dark:text-gray-100">
@@ -108,7 +100,6 @@
                                                     name="files[{{ $dataSource['id'] }}]"
                                                     type="file"
                                                     wire:model.live="files.{{ $dataSource['id'] }}"
-                                                    accept="{{ $accept }}"
                                                     class="sr-only"
                                                 />
                                             </label>
