@@ -5,7 +5,7 @@
         </x-slot>
 
         <x-slot name="content">
-            <div class="space-y-8">
+            <form wire:submit.prevent="submit" id="create-run-form" class="space-y-8">
                 <div class="space-y-3">
                     <x-label for="collection_notice_type_id" value="{{ __('Tipo de comunicado') }}" />
 
@@ -22,10 +22,32 @@
                     </select>
 
                     @error('typeId')
-                        <p class="inline-flex items-center rounded-3xl bg-danger-600 px-3 py-1 text-xs font-semibold text-white">
+                        <p class="inline-flex items-center rounded-3xl bg-danger px-3 py-1 text-xs font-semibold text-white">
                             {{ $message }}
                         </p>
                     @enderror
+                </div>
+
+                <div class="space-y-3">
+                    <x-label for="period" value="{{ __('Periodo') }}" />
+
+                    <input
+                        id="period"
+                        name="period"
+                        type="text"
+                        wire:model.live="period"
+                        @if ($periodReadonly) readonly @endif
+                        placeholder="{{ $periodMode === 'write' ? __('YYYYMM') : '' }}"
+                        class="block w-full rounded-3xl border border-gray-300 bg-white px-4 py-3 text-sm text-gray-700 shadow-sm transition focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+                    />
+
+                    @if ($periodMode === 'write')
+                        @error('period')
+                            <p class="inline-flex items-center rounded-3xl bg-danger px-3 py-1 text-xs font-semibold text-white">
+                                {{ $message }}
+                            </p>
+                        @enderror
+                    @endif
                 </div>
 
                 <div class="space-y-4">
@@ -42,23 +64,37 @@
                             {{ __('El tipo de comunicado seleccionado no tiene insumos configurados actualmente.') }}
                         </div>
                     @else
-                        <div class="space-y-6">
-                            @foreach ($dataSources as $dataSource)
-                                @php($fileKey = (string) ($dataSource['id'] ?? ''))
-                                @php($selectedFile = $fileKey !== '' ? ($files[$fileKey] ?? null) : null)
+                        <div class="rounded-3xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-900/40">
+                            <div class="grid grid-cols-1 gap-3 border-b border-gray-200 bg-gray-100 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 sm:grid-cols-3">
+                                <div>{{ __('Nombre – Código') }}</div>
+                                <div>{{ __('Tipo de Archivo') }}</div>
+                                <div>{{ __('Upload') }}</div>
+                            </div>
 
-                                <div wire:key="data-source-{{ $dataSource['id'] }}" class="space-y-2">
-                                    <div class="grid items-center gap-4 sm:grid-cols-[minmax(0,1fr)_auto]">
-                                        <div class="space-y-1">
-                                            <p class="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                                                {{ $dataSource['name'] }}
-                                            </p>
-                                            <p class="text-xs text-gray-500 dark:text-gray-400">
-                                                {{ __('Código: :code', ['code' => $dataSource['code']]) }}
+                            <div class="max-h-80 overflow-y-auto divide-y divide-gray-200 px-4 dark:divide-gray-700">
+                                @foreach ($dataSources as $dataSource)
+                                    @php($fileKey = (string) ($dataSource['id'] ?? ''))
+                                    @php($selectedFile = $fileKey !== '' ? ($files[$fileKey] ?? null) : null)
+                                    @php($extension = strtolower($dataSource['extension'] ?? ''))
+                                    @php($accept = match ($extension) {
+                                        'csv' => '.csv',
+                                        'xls' => '.xls',
+                                        'xlsx' => '.xlsx,.xls',
+                                        default => '.csv,.xlsx,.xls',
+                                    })
+
+                                    <div wire:key="data-source-{{ $dataSource['id'] }}" class="grid grid-cols-1 items-center gap-3 py-4 text-sm text-gray-700 dark:text-gray-200 sm:grid-cols-3">
+                                        <div class="space-y-1 text-sm">
+                                            <p class="font-semibold text-gray-900 dark:text-gray-100">
+                                                {{ $dataSource['name'] }} - {{ $dataSource['code'] }}
                                             </p>
                                         </div>
 
-                                        <div class="flex flex-col items-start gap-2 sm:items-end">
+                                        <div class="text-xs uppercase tracking-wide text-gray-600 dark:text-gray-400">
+                                            {{ $dataSource['extension'] ? strtoupper($dataSource['extension']) : __('N/A') }}
+                                        </div>
+
+                                        <div class="space-y-2">
                                             <label
                                                 for="file-{{ $dataSource['id'] }}"
                                                 class="inline-flex w-full items-center justify-center gap-2 rounded-3xl border border-primary-300 bg-white px-4 py-2 text-sm font-semibold text-primary-900 shadow-sm transition hover:border-primary-500 hover:bg-primary-200/60 focus-within:ring-2 focus-within:ring-primary-500 focus-within:ring-offset-2 focus-within:ring-offset-white dark:border-gray-600 dark:bg-gray-900 dark:text-primary-200 dark:focus-within:ring-offset-gray-900 sm:w-auto"
@@ -70,7 +106,7 @@
                                                     name="files[{{ $dataSource['id'] }}]"
                                                     type="file"
                                                     wire:model.live="files.{{ $dataSource['id'] }}"
-                                                    accept=".csv,.xlsx,.xls"
+                                                    accept="{{ $accept }}"
                                                     class="sr-only"
                                                 />
                                             </label>
@@ -80,41 +116,41 @@
                                                     {{ method_exists($selectedFile, 'getClientOriginalName') ? $selectedFile->getClientOriginalName() : (string) $selectedFile }}
                                                 </p>
                                             @endif
+
+                                            @error('files.' . $dataSource['id'])
+                                                <p class="inline-flex items-center rounded-3xl bg-danger px-3 py-1 text-xs font-semibold text-white">
+                                                    {{ $message }}
+                                                </p>
+                                            @enderror
                                         </div>
                                     </div>
-
-                                    @error('files.' . $dataSource['id'])
-                                        <p class="inline-flex items-center rounded-3xl bg-danger-600 px-3 py-1 text-xs font-semibold text-white">
-                                            {{ $message }}
-                                        </p>
-                                    @enderror
-                                </div>
-                            @endforeach
+                                @endforeach
+                            </div>
                         </div>
                     @endif
                 </div>
-            </div>
+            </form>
         </x-slot>
 
         <x-slot name="footer">
+            @php($isFormValid = $this->isFormValid)
+
             <div class="flex w-full justify-end gap-3">
                 <button
                     type="button"
                     wire:click="cancel"
-                    class="inline-flex items-center justify-center gap-2 rounded-3xl bg-danger px-5 py-2 text-button font-semibold text-white transition hover:bg-danger-300 focus:outline-none focus:ring-2 focus:ring-danger-300 focus:ring-offset-2 focus:ring-offset-white dark:focus:ring-offset-gray-900"
+                    class="inline-flex items-center justify-center gap-2 rounded-3xl bg-primary-900 px-5 py-2 text-button font-semibold text-secondary transition hover:bg-primary-600 focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-2 focus:ring-offset-white dark:focus:ring-offset-gray-900"
                 >
-                    {{ __('Cancelar') }}
+                    {{ __('Cerrar') }}
                 </button>
 
-                @php($isFormValid = $this->isFormValid)
-
                 <button
-                    type="button"
-                    wire:click="submit"
+                    type="submit"
+                    form="create-run-form"
                     @if (! $isFormValid) disabled aria-disabled="true" @else aria-disabled="false" @endif
-                    class="inline-flex items-center justify-center gap-2 rounded-3xl bg-primary-900 px-5 py-2 text-button font-semibold text-primary transition hover:bg-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 focus:ring-offset-white disabled:cursor-not-allowed disabled:opacity-60 dark:focus:ring-offset-gray-900"
+                    class="inline-flex items-center justify-center gap-2 rounded-3xl bg-secondary-900 px-5 py-2 text-button font-semibold text-primary transition hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-secondary focus:ring-offset-2 focus:ring-offset-white disabled:cursor-not-allowed disabled:opacity-60 dark:focus:ring-offset-gray-900"
                 >
-                    {{ __('Aceptar') }}
+                    {{ __('Generar Trabajo') }}
                 </button>
             </div>
         </x-slot>
