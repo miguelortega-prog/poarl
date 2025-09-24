@@ -28,28 +28,30 @@
                         <p class="text-sm text-gray-500 dark:text-gray-400">
                             {{ __('Selecciona un tipo de comunicado para ver los insumos requeridos.') }}
                         </p>
-                    @elseif (empty($dataSources))
-                        <div class="rounded-2xl border border-dashed border-gray-300 px-4 py-3 text-sm text-gray-500 dark:border-gray-600 dark:text-gray-400">
-                            {{ __('El tipo de comunicado seleccionado no tiene insumos configurados actualmente.') }}
-                        </div>
                     @else
-                        <div class="space-y-5">
-                            @foreach ($dataSources as $dataSource)
-                                <div wire:key="data-source-{{ $dataSource['id'] }}" class="space-y-2">
-                                    <x-label for="file-{{ $dataSource['id'] }}" :value="$dataSource['name']" />
+                        @if (empty($dataSources))
+                            <div class="rounded-2xl border border-dashed border-gray-300 px-4 py-3 text-sm text-gray-500 dark:border-gray-600 dark:text-gray-400">
+                                {{ __('El tipo de comunicado seleccionado no tiene insumos configurados actualmente.') }}
+                            </div>
+                        @else
+                            <div class="space-y-5">
+                                @foreach ($dataSources as $dataSource)
+                                    <div wire:key="data-source-{{ $dataSource['id'] }}" class="space-y-2">
+                                        <x-label for="file-{{ $dataSource['id'] }}" :value="$dataSource['name']" />
 
-                                    <input
-                                        id="file-{{ $dataSource['id'] }}"
-                                        name="files[{{ $dataSource['id'] }}]"
-                                        type="file"
-                                        wire:model.live="files.{{ $dataSource['id'] }}"
-                                        accept=".csv,.xlsx,.xls"
-                                        required
-                                        class="block w-full cursor-pointer rounded-2xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
-                                    />
-                                </div>
-                            @endforeach
-                        </div>
+                                        <input
+                                            id="file-{{ $dataSource['id'] }}"
+                                            name="files[{{ $dataSource['id'] }}]"
+                                            type="file"
+                                            wire:model.live="files.{{ $dataSource['id'] }}"
+                                            accept=".csv,.xlsx,.xls"
+                                            required
+                                            class="block w-full cursor-pointer rounded-2xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+                                        />
+                                    </div>
+                                @endforeach
+                            </div>
+                        @endif
                     @endif
                 </div>
             </div>
