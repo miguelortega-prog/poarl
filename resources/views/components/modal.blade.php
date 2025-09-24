@@ -3,13 +3,16 @@
 @php
 $id = $id ?? md5($attributes->wire('model'));
 
-$maxWidth = [
+$availableMaxWidths = [
     'sm' => 'sm:max-w-sm',
     'md' => 'sm:max-w-md',
     'lg' => 'sm:max-w-lg',
     'xl' => 'sm:max-w-xl',
     '2xl' => 'sm:max-w-2xl',
-][$maxWidth ?? '2xl'];
+    '3xl' => 'sm:max-w-3xl',
+];
+
+$maxWidth = $availableMaxWidths[$maxWidth ?? '2xl'] ?? $availableMaxWidths['2xl'];
 @endphp
 
 <div
