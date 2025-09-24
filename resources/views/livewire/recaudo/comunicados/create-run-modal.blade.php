@@ -68,8 +68,8 @@
                 <x-button
                     type="button"
                     class="disabled:cursor-not-allowed disabled:opacity-50"
-                    @disabled(! $isFormValid)
-                    aria-disabled="{{ $isFormValid ? 'false' : 'true' }}"
+                    :disabled="! $isFormValid"
+                    :aria-disabled="$isFormValid ? 'false' : 'true'"
                 >
                     {{ __('Continuar') }}
                 </x-button>
