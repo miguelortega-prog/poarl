@@ -1,10 +1,10 @@
 import './bootstrap';
 import '../css/app.css';
-import Alpine from 'alpinejs';
-import collapse from '@alpinejs/collapse'; // Importa el plugin
 
-window.Alpine = Alpine;
+import collapse from '@alpinejs/collapse';
+import focus from '@alpinejs/focus';
 
-Alpine.plugin(collapse); // Registra el plugin
-
-Alpine.start();
+document.addEventListener('alpine:init', () => {
+    window.Alpine.plugin(collapse);
+    window.Alpine.plugin(focus);
+});
