@@ -6,7 +6,7 @@
 
         <x-slot name="content">
             <form wire:submit.prevent="submit" id="create-run-form" class="space-y-8">
-                <div class="grid gap-6 sm:grid-cols-2">
+                <div class="grid gap-6 tablet:grid-cols-2">
                     <div class="flex flex-col gap-3">
                         <x-label for="collection_notice_type_id" value="{{ __('Tipo de comunicado') }}" />
 
@@ -68,9 +68,9 @@
                     @else
                         <div class="rounded-3xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-900/40">
                             <div class="grid grid-cols-12 gap-3 border-b border-gray-200 bg-gray-100 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300">
-                                <div class="col-span-12 sm:col-span-6 lg:col-span-6">{{ __('Nombre – Código') }}</div>
-                                <div class="col-span-12 sm:col-span-3 lg:col-span-3">{{ __('Tipo de Archivo') }}</div>
-                                <div class="col-span-12 sm:col-span-3 lg:col-span-3">{{ __('Upload') }}</div>
+                                <div class="col-span-12 tablet:col-span-6 desktop:col-span-6">{{ __('Nombre – Código') }}</div>
+                                <div class="col-span-12 tablet:col-span-3 desktop:col-span-3">{{ __('Tipo de Archivo') }}</div>
+                                <div class="col-span-12 tablet:col-span-3 desktop:col-span-3">{{ __('Upload') }}</div>
                             </div>
 
                             <div class="max-h-80 overflow-y-auto divide-y divide-gray-200 px-4 dark:divide-gray-700">
@@ -86,20 +86,20 @@
                                     })
 
                                     <div wire:key="data-source-{{ $dataSource['id'] }}" class="grid grid-cols-12 items-start gap-3 py-4 text-sm text-gray-700 dark:text-gray-200">
-                                        <div class="col-span-12 space-y-1 text-sm sm:col-span-6 lg:col-span-6">
+                                        <div class="col-span-12 space-y-1 text-sm tablet:col-span-6 desktop:col-span-6">
                                             <p class="font-semibold text-gray-900 dark:text-gray-100">
                                                 {{ $dataSource['name'] }} - {{ $dataSource['code'] }}
                                             </p>
                                         </div>
 
-                                        <div class="col-span-12 text-xs uppercase tracking-wide text-gray-600 dark:text-gray-400 sm:col-span-3 lg:col-span-3">
+                                        <div class="col-span-12 text-xs uppercase tracking-wide text-gray-600 dark:text-gray-400 tablet:col-span-3 desktop:col-span-3">
                                             {{ $dataSource['extension'] ? strtoupper($dataSource['extension']) : __('N/A') }}
                                         </div>
 
-                                        <div class="col-span-12 space-y-2 sm:col-span-3 lg:col-span-3">
+                                        <div class="col-span-12 space-y-2 tablet:col-span-3 desktop:col-span-3">
                                             <label
                                                 for="file-{{ $dataSource['id'] }}"
-                                                class="inline-flex w-full items-center justify-center gap-2 rounded-3xl border border-primary-300 bg-white px-4 py-2 text-sm font-semibold text-primary-900 shadow-sm transition hover:border-primary-500 hover:bg-primary-200/60 focus-within:ring-2 focus-within:ring-primary-500 focus-within:ring-offset-2 focus-within:ring-offset-white dark:border-gray-600 dark:bg-gray-900 dark:text-primary-200 dark:focus-within:ring-offset-gray-900 sm:w-auto"
+                                                class="inline-flex w-full items-center justify-center gap-2 rounded-3xl border border-primary-300 bg-white px-4 py-2 text-sm font-semibold text-primary-900 shadow-sm transition hover:border-primary-500 hover:bg-primary-200/60 focus-within:ring-2 focus-within:ring-primary-500 focus-within:ring-offset-2 focus-within:ring-offset-white dark:border-gray-600 dark:bg-gray-900 dark:text-primary-200 dark:focus-within:ring-offset-gray-900 tablet:w-auto"
                                             >
                                                 <i class="fa-solid fa-upload"></i>
                                                 <span>{{ __('Seleccionar archivo') }}</span>
