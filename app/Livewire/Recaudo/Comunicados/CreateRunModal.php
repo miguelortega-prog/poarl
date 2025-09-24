@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Http\Livewire\Recaudo\Comunicados;
+namespace App\Livewire\Recaudo\Comunicados;
 
 use App\Models\CollectionNoticeType;
 use Illuminate\Contracts\View\View;
