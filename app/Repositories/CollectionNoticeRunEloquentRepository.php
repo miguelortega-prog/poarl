@@ -3,9 +3,10 @@
 namespace App\Repositories;
 
 use App\DTOs\Recaudo\Comunicados\CollectionNoticeRunFiltersDto;
-use App\Repositories\Interfaces\CollectionNoticeRunRepositoryInterface;
 use App\DTOs\Recaudo\Comunicados\CreateCollectionNoticeRunDto;
+use App\Enums\Recaudo\CollectionNoticeRunStatus;
 use App\Models\CollectionNoticeRun;
+use App\Repositories\Interfaces\CollectionNoticeRunRepositoryInterface;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 
@@ -16,9 +17,21 @@ final class CollectionNoticeRunEloquentRepository implements CollectionNoticeRun
         return CollectionNoticeRun::query()->create([
             'collection_notice_type_id' => $dto->collectionNoticeTypeId,
             'period_value'              => $dto->periodValue,
-            'requested_by'              => $dto->requestedBy,
-            'status'                    => 'ready',
+            'requested_by_id'           => $dto->requestedById,
+            'status'                    => CollectionNoticeRunStatus::READY->value,
         ]);
+    }
+
+    public function findWithFiles(int $id): ?CollectionNoticeRun
+    {
+        return CollectionNoticeRun::query()
+            ->with(['files:id,collection_notice_run_id,disk,path'])
+            ->find($id);
+    }
+
+    public function delete(CollectionNoticeRun $run): void
+    {
+        $run->delete();
     }
 
     public function paginateWithRelations(CollectionNoticeRunFiltersDto $filters, int $perPage = 15): LengthAwarePaginator

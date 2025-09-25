@@ -12,7 +12,7 @@ final class CreateCollectionNoticeRunDto
     public function __construct(
         public readonly int $collectionNoticeTypeId,
         public readonly string $periodValue,
-        public readonly int $requestedBy,
+        public readonly int $requestedById,
         public readonly array $files,
     ) {}
 }

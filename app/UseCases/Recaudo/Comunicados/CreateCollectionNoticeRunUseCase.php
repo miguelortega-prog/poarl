@@ -10,7 +10,6 @@ use App\Models\CollectionNoticeType;
 use App\Models\CollectionNoticeRun;
 use Illuminate\Contracts\Filesystem\Factory as FilesystemFactory;
 use Illuminate\Database\DatabaseManager;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use RuntimeException;
 
@@ -93,7 +92,7 @@ final class CreateCollectionNoticeRunUseCase
                         mime: $file->getMimeType(),
                         ext: $ext ? strtolower($ext) : null,
                         sha256: $sha256,
-                        uploadedBy: $dto->requestedBy,
+                        uploadedBy: $dto->requestedById,
                     )
                 );
             }
