@@ -41,15 +41,34 @@ class CreateRunModal extends Component
      */
     public array $files = [];
 
-    protected array $messages = [
-        'typeId.required' => 'Selecciona un tipo de comunicado.',
-        'typeId.exists' => 'Selecciona un tipo de comunicado válido.',
-        'period.required' => 'Debes ingresar el periodo en formato YYYYMM.',
-        'period.regex' => 'El periodo debe tener formato YYYYMM.',
-        'files.*.required' => 'Debes adjuntar el archivo correspondiente a este insumo.',
-        'files.*.file' => 'Adjunta un archivo válido.',
-        'files.*.mimes' => 'Solo se permiten archivos en formato CSV o Excel.',
-    ];
+    protected function messages(): array
+    {
+        $messages = [
+            'typeId.required' => 'Selecciona un tipo de comunicado.',
+            'typeId.exists' => 'Selecciona un tipo de comunicado válido.',
+            'period.required' => 'Debes ingresar el periodo en formato YYYYMM.',
+            'period.regex' => 'El periodo debe tener formato YYYYMM.',
+            'files.*.required' => 'Debes adjuntar el archivo correspondiente a este insumo.',
+            'files.*.file' => 'Adjunta un archivo válido.',
+            'files.*.max' => 'El archivo supera el tamaño máximo permitido (10 MB).',
+        ];
+
+        foreach ($this->dataSources as $dataSource) {
+            if (! isset($dataSource['id'])) {
+                continue;
+            }
+
+            $extension = strtolower((string) ($dataSource['extension'] ?? ''));
+            $messages['files.' . $dataSource['id'] . '.mimes'] = match ($extension) {
+                'csv' => 'Formato inválido. Este insumo solo acepta archivos CSV o TXT.',
+                'xls' => 'Formato inválido. Este insumo solo acepta archivos XLS.',
+                'xlsx' => 'Formato inválido. Este insumo solo acepta archivos XLSX o XLS.',
+                default => 'Formato inválido. Este insumo permite archivos CSV, XLS o XLSX.',
+            };
+        }
+
+        return $messages;
+    }
 
     protected array $validationAttributes = [
         'typeId' => 'tipo de comunicado',
