@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\CollectionNoticeRunsController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
@@ -17,7 +18,6 @@ Route::middleware([
 });
 
 Route::middleware(['auth', 'verified'])->group(function () {
-    Route::get('/recaudo/comunicados', function () {
-        return view('recaudo.comunicados.index');
-    })->name('recaudo.comunicados.index');
+    Route::get('/recaudo/comunicados', [CollectionNoticeRunsController::class, 'index'])
+        ->name('recaudo.comunicados.index');
 });
