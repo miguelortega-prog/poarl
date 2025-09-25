@@ -59,7 +59,11 @@ return [
             'throw' => false,
             'report' => false,
         ],
-
+        'collection' => [
+            'driver' => 'local',
+            'root' => storage_path('app/collection'),
+            'throw' => true,
+        ],
     ],
 
     /*

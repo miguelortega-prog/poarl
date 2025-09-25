@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class CollectionNoticeRun extends Model
 {
@@ -37,8 +38,13 @@ class CollectionNoticeRun extends Model
     }
 
     // Scopes útiles
-    public function scopeStatus($query, string $status)
+    public function scopeStatus($query, string $status): String
     {
         return $query->where('status', $status);
     }
+
+    public function files(): HasMany
+    {
+        return $this->hasMany(CollectionNoticeRunFile::class);
+    }    
 }

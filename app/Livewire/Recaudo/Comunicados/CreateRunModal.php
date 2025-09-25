@@ -2,7 +2,9 @@
 
 namespace App\Livewire\Recaudo\Comunicados;
 
+use App\DTOs\Recaudo\Comunicados\CreateCollectionNoticeRunDto;
 use App\Models\CollectionNoticeType;
+use App\UseCases\Recaudo\Comunicados\CreateCollectionNoticeRunUseCase;
 use Carbon\Carbon;
 use Illuminate\Contracts\View\View;
 use Livewire\Attributes\On;
@@ -247,6 +249,35 @@ class CreateRunModal extends Component
     public function submit(): void
     {
         $this->validate();
+
+        $userId = (int) auth()->id();
+
+        $normalizedFiles = [];
+        foreach ($this->files as $key => $file) {
+            $normalizedFiles[(int) $key] = $file;
+        }
+
+        $dto = new CreateCollectionNoticeRunDto (
+            collectionNoticeTypeId: (int) $this->typeId,
+            periodValue: (string) ($this->periodValue ?: $this->period),
+            requestedBy: $userId,
+            files: $normalizedFiles,
+        );
+
+        /** @var CreateCollectionNoticeRunUseCase $useCase */
+        $useCase = app(CreateCollectionNoticeRunUseCase::class);
+
+        try {
+            $result = $useCase($dto);
+
+            // UX: cerrar, limpiar y notificar
+            $this->dispatch('toast', type: 'success', message: __('Trabajo generado correctamente.'));
+            $this->cancel();
+        } catch (\Throwable $e) {
+            report($e);
+            $this->addError('general', __('No fue posible crear el trabajo. Intenta de nuevo.'));
+            $this->dispatch('toast', type: 'error', message: $e->getMessage());
+        }        
     }
 
     public function render(): View
