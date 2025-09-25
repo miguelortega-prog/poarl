@@ -6,7 +6,7 @@
 
         <x-slot name="content">
             <form wire:submit.prevent="submit" id="create-run-form" class="space-y-8">
-                <div class="grid gap-6 tablet:grid-cols-2">
+                <div class="grid grid-cols-2 gap-6">
                     <div class="flex flex-col gap-3">
                         <x-label for="collection_notice_type_id" value="{{ __('Tipo de comunicado') }}" />
 
