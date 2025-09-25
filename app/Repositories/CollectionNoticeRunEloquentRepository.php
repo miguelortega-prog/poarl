@@ -5,6 +5,7 @@ namespace App\Repositories;
 use App\Repositories\Interfaces\CollectionNoticeRunRepositoryInterface;
 use App\DTOs\Recaudo\Comunicados\CreateCollectionNoticeRunDto;
 use App\Models\CollectionNoticeRun;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 
 final class CollectionNoticeRunEloquentRepository implements CollectionNoticeRunRepositoryInterface
 {
@@ -16,5 +17,19 @@ final class CollectionNoticeRunEloquentRepository implements CollectionNoticeRun
             'requested_by'              => $dto->requestedBy,
             'status'                    => 'ready',
         ]);
+    }
+
+    public function paginateWithRelations(int $perPage = 15): LengthAwarePaginator
+    {
+        return CollectionNoticeRun::query()
+            ->with([
+                'type:id,name',
+                'requestedBy:id,name',
+                'files:id,collection_notice_run_id,original_name,notice_data_source_id,uploaded_by,created_at',
+                'files.dataSource:id,name',
+                'files.uploader:id,name',
+            ])
+            ->latest('created_at')
+            ->paginate($perPage);
     }
 }

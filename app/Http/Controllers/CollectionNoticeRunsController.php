@@ -2,9 +2,22 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Request;
+use App\UseCases\Recaudo\Comunicados\ListCollectionNoticeRunsUseCase;
+use Illuminate\Contracts\View\View;
 
-class CollectionNoticeRunsController extends Controller
+final class CollectionNoticeRunsController extends Controller
 {
-    //
+    public function __construct(
+        private readonly ListCollectionNoticeRunsUseCase $listCollectionNoticeRuns,
+    ) {
+    }
+
+    public function index(): View
+    {
+        $runs = ($this->listCollectionNoticeRuns)();
+
+        return view('recaudo.comunicados.index', [
+            'runs' => $runs,
+        ]);
+    }
 }
