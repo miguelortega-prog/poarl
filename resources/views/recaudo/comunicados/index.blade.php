@@ -120,7 +120,7 @@
                         </div>
                     </form>
 
-                    <div class="grid grid-cols-8 gap-4 rounded-2xl bg-gray-100 px-6 py-3 text-label font-semibold uppercase tracking-wide text-gray-700 dark:bg-gray-900/60 dark:text-gray-200">
+                    <div class="grid grid-cols-9 gap-4 rounded-2xl bg-gray-100 px-6 py-3 text-label font-semibold uppercase tracking-wide text-gray-700 dark:bg-gray-900/60 dark:text-gray-200">
                         <span>{{ __('Id Comunicado') }}</span>
                         <span>{{ __('Fecha Programación') }}</span>
                         <span>{{ __('Usuario Programación') }}</span>
@@ -129,10 +129,14 @@
                         <span>{{ __('Estado') }}</span>
                         <span>{{ __('Resultados') }}</span>
                         <span class="text-center">{{ __('Archivos') }}</span>
+                        <span class="text-center">OPERATIONS</span>
                     </div>
 
                     @forelse ($runs ?? [] as $run)
-                        <div class="grid grid-cols-8 items-center gap-4 rounded-2xl border border-gray-200 px-6 py-4 text-body text-gray-700 transition dark:border-gray-700 dark:text-gray-200">
+                        @php
+                            $canDelete = $run->status === \App\Enums\Recaudo\CollectionNoticeRunStatus::READY->value;
+                        @endphp
+                        <div class="grid grid-cols-9 items-center gap-4 rounded-2xl border border-gray-200 px-6 py-4 text-body text-gray-700 transition dark:border-gray-700 dark:text-gray-200">
                             <span class="font-semibold text-gray-900 dark:text-gray-100">#{{ $run->id }}</span>
                             <span>{{ optional($run->created_at)->format('d/m/Y H:i') ?? __('Sin programación') }}</span>
                             <span>{{ $run->requestedBy?->name ?? __('No asignado') }}</span>
@@ -223,6 +227,41 @@
                                         </div>
                                     </div>
                                 </div>
+                            </div>
+
+                            <div class="flex justify-center">
+                                <form
+                                    method="POST"
+                                    action="{{ route('recaudo.comunicados.destroy', $run) }}"
+                                    x-data="{ confirmDelete() { return confirm(@js(__('¿Deseas eliminar este comunicado? Esta acción no se puede deshacer.'))); } }"
+                                >
+                                    @csrf
+                                    @method('DELETE')
+
+                                    <button
+                                        type="submit"
+                                        @click.prevent="
+                                            if (! {{ $canDelete ? 'true' : 'false' }}) {
+                                                return;
+                                            }
+
+                                            if (confirmDelete()) {
+                                                $el.closest('form').submit();
+                                            }
+                                        "
+                                        @disabled(! $canDelete)
+                                        aria-disabled="{{ $canDelete ? 'false' : 'true' }}"
+                                        class="inline-flex items-center justify-center rounded-full p-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-white dark:focus:ring-offset-gray-900 {{
+                                            $canDelete
+                                                ? 'bg-red-100 text-red-600 hover:bg-red-200 focus:ring-red-500'
+                                                : 'cursor-not-allowed bg-gray-200 text-gray-400 dark:bg-gray-700 dark:text-gray-500'
+                                        }}"
+                                        title="{{ $canDelete ? __('Eliminar comunicado') : __('Solo se pueden eliminar comunicados en estado listo.') }}"
+                                    >
+                                        <i class="fa-solid fa-trash"></i>
+                                        <span class="sr-only">{{ __('Eliminar comunicado') }}</span>
+                                    </button>
+                                </form>
                             </div>
                         </div>
                     @empty

@@ -260,7 +260,7 @@ class CreateRunModal extends Component
         $dto = new CreateCollectionNoticeRunDto (
             collectionNoticeTypeId: (int) $this->typeId,
             periodValue: (string) ($this->periodValue ?: $this->period),
-            requestedBy: $userId,
+            requestedById: $userId,
             files: $normalizedFiles,
         );
 

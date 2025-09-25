@@ -20,4 +20,7 @@ Route::middleware([
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/recaudo/comunicados', [CollectionNoticeRunsController::class, 'index'])
         ->name('recaudo.comunicados.index');
+
+    Route::delete('/recaudo/comunicados/{run}', [CollectionNoticeRunsController::class, 'destroy'])
+        ->name('recaudo.comunicados.destroy');
 });
