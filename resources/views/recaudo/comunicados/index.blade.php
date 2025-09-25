@@ -19,6 +19,107 @@
                 </div>
 
                 <div class="mt-8 space-y-6">
+                    @php
+                        $filters = $filters ?? [
+                            'requested_by_id' => null,
+                            'collection_notice_type_id' => null,
+                            'date_from' => null,
+                            'date_to' => null,
+                        ];
+                    @endphp
+
+                    <form
+                        method="GET"
+                        action="{{ route('recaudo.comunicados.index') }}"
+                        class="grid grid-cols-1 gap-4 rounded-3xl border border-gray-200 bg-gray-50 p-6 shadow-inner dark:border-gray-700 dark:bg-gray-900/40 desktop:grid-cols-5"
+                    >
+                        <div class="grid gap-2">
+                            <label for="requested_by_id" class="text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300">
+                                {{ __('Usuario programación') }}
+                            </label>
+                            <select
+                                id="requested_by_id"
+                                name="requested_by_id"
+                                class="w-full rounded-2xl border border-gray-200 bg-white px-4 py-2 text-sm text-gray-700 transition focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary-500 dark:border-gray-700 dark:bg-gray-900/60 dark:text-gray-100"
+                            >
+                                <option value="">{{ __('Todos') }}</option>
+                                @foreach ($requesters ?? [] as $requester)
+                                    <option value="{{ $requester->id }}" @selected((string) $filters['requested_by_id'] === (string) $requester->id)>
+                                        {{ $requester->name }}
+                                    </option>
+                                @endforeach
+                            </select>
+                        </div>
+
+                        <div class="grid gap-2">
+                            <label for="collection_notice_type_id" class="text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300">
+                                {{ __('Tipo de cargue') }}
+                            </label>
+                            <select
+                                id="collection_notice_type_id"
+                                name="collection_notice_type_id"
+                                class="w-full rounded-2xl border border-gray-200 bg-white px-4 py-2 text-sm text-gray-700 transition focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary-500 dark:border-gray-700 dark:bg-gray-900/60 dark:text-gray-100"
+                            >
+                                <option value="">{{ __('Todos') }}</option>
+                                @foreach ($types ?? [] as $type)
+                                    <option value="{{ $type->id }}" @selected((string) $filters['collection_notice_type_id'] === (string) $type->id)>
+                                        {{ $type->name }}
+                                    </option>
+                                @endforeach
+                            </select>
+                        </div>
+
+                        <div class="grid gap-2 desktop:col-span-2">
+                            <span class="text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300">
+                                {{ __('Rango de fechas') }}
+                            </span>
+                            <div class="grid grid-cols-1 gap-3 desktop:grid-cols-2">
+                                <div class="grid gap-1">
+                                    <label for="date_from" class="text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                                        {{ __('Desde') }}
+                                    </label>
+                                    <input
+                                        type="date"
+                                        id="date_from"
+                                        name="date_from"
+                                        value="{{ $filters['date_from'] }}"
+                                        class="w-full rounded-2xl border border-gray-200 bg-white px-4 py-2 text-sm text-gray-700 transition focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary-500 dark:border-gray-700 dark:bg-gray-900/60 dark:text-gray-100"
+                                    >
+                                </div>
+                                <div class="grid gap-1">
+                                    <label for="date_to" class="text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                                        {{ __('Hasta') }}
+                                    </label>
+                                    <input
+                                        type="date"
+                                        id="date_to"
+                                        name="date_to"
+                                        value="{{ $filters['date_to'] }}"
+                                        class="w-full rounded-2xl border border-gray-200 bg-white px-4 py-2 text-sm text-gray-700 transition focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary-500 dark:border-gray-700 dark:bg-gray-900/60 dark:text-gray-100"
+                                    >
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="flex items-end gap-3">
+                            <button
+                                type="submit"
+                                class="inline-flex w-full items-center justify-center gap-2 rounded-3xl bg-primary px-5 py-2 text-sm font-semibold text-white transition hover:bg-primary-600 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 focus:ring-offset-white dark:focus:ring-offset-gray-900"
+                            >
+                                <i class="fa-solid fa-filter"></i>
+                                <span>{{ __('Filtrar') }}</span>
+                            </button>
+
+                            <a
+                                href="{{ route('recaudo.comunicados.index') }}"
+                                class="inline-flex items-center justify-center gap-2 rounded-3xl border border-gray-200 px-5 py-2 text-sm font-semibold text-gray-600 transition hover:border-primary hover:text-primary focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 focus:ring-offset-white dark:border-gray-700 dark:text-gray-300 dark:hover:border-primary"
+                            >
+                                <i class="fa-solid fa-rotate-right"></i>
+                                <span>{{ __('Limpiar') }}</span>
+                            </a>
+                        </div>
+                    </form>
+
                     <div class="grid grid-cols-8 gap-4 rounded-2xl bg-gray-100 px-6 py-3 text-label font-semibold uppercase tracking-wide text-gray-700 dark:bg-gray-900/60 dark:text-gray-200">
                         <span>{{ __('Id Comunicado') }}</span>
                         <span>{{ __('Fecha Programación') }}</span>
@@ -93,7 +194,7 @@
                                             </button>
                                         </div>
 
-                                        <div class="mt-4 space-y-3">
+                                        <div class="mt-4 max-h-64 space-y-3 overflow-y-auto pr-1">
                                             @forelse ($run->files as $file)
                                                 <div class="rounded-2xl border border-gray-200 p-4 dark:border-gray-700">
                                                     <p class="text-sm font-semibold text-gray-900 dark:text-gray-100">{{ $file->original_name }}</p>
