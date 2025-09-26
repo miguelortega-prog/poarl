@@ -1,6 +1,6 @@
-const THIRTY_MB = 30 * 1024 * 1024;
-const DEFAULT_CHUNK_SIZE = THIRTY_MB;
-const MAX_CHUNK_SIZE = THIRTY_MB;
+const FIVE_MB = 5 * 1024 * 1024;
+const DEFAULT_CHUNK_SIZE = FIVE_MB;
+const MAX_CHUNK_SIZE = FIVE_MB;
 
 if (typeof document !== 'undefined') {
     document.addEventListener('livewire:init', () => {
@@ -279,12 +279,6 @@ export function collectionRunUploader(options) {
             });
         },
 
-        progressStyle() {
-            const width = Number.isFinite(this.progress) ? clamp(this.progress, 0, 100) : 0;
-
-            return `width: ${width.toFixed(2)}%`;
-        },
-
         clearState(registry) {
             clearUploaderState(registry, this.dataSourceId);
         },
@@ -295,14 +289,8 @@ export function collectionRunUploader(options) {
             }
 
             const normalized = clamp(value, 0, 100);
-
-            if (normalized === this.progress) {
-                this.persistState(stateRegistry);
-
-                return;
-            }
-
-            this.progress = normalized > this.progress ? normalized : this.progress;
+            console.log('Progress update:', normalized);
+            this.progress = normalized;
             this.persistState(stateRegistry);
         },
     };
