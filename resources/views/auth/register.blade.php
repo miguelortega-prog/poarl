@@ -122,9 +122,12 @@
                     {{ __('Already registered?') }}
                 </a>
 
-                <x-button class="ms-4">
+                <button
+                    type="submit"
+                    class="ms-4 inline-flex items-center justify-center px-6 py-2.5 rounded-3xl bg-secondary-900 text-primary font-semibold uppercase tracking-widest transition-colors duration-200 hover:bg-secondary-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-secondary-600"
+                >
                     {{ __('Register') }}
-                </x-button>
+                </button>
             </div>
         </form>
     </x-authentication-card>
