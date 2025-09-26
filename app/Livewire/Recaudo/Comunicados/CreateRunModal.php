@@ -252,9 +252,7 @@ class CreateRunModal extends Component
             return;
         }
 
-        $this->files[(string) $dataSourceId] = $normalized;
-
-        $this->resetValidation(['files.' . $dataSourceId]);
+        $this->storeUploadedFileMetadata($dataSourceId, $normalized);
 
         $this->logChunkActivity('uploaded', $dataSourceId, [
             'temporary_filename' => $uploadedFile->getFilename(),
@@ -359,15 +357,13 @@ class CreateRunModal extends Component
             return;
         }
 
-        $this->files[(string) $dataSourceId] = [
+        $this->storeUploadedFileMetadata($dataSourceId, [
             'path' => $path,
             'original_name' => (string) ($file['original_name'] ?? ''),
             'size' => isset($file['size']) ? (int) $file['size'] : 0,
             'mime' => $file['mime'] ?? null,
             'extension' => $file['extension'] ?? null,
-        ];
-
-        $this->resetValidation(['files.' . $dataSourceId]);
+        ]);
     }
 
     #[On('openCreateRunModal')]
@@ -541,5 +537,15 @@ class CreateRunModal extends Component
                 'data_source_id' => $dataSourceId,
             ], $context),
         );
+    }
+
+    /**
+     * @param array{path: string, original_name: string, size: int, mime: string|null, extension: string|null} file
+     */
+    private function storeUploadedFileMetadata(int $dataSourceId, array $file): void
+    {
+        $this->files[(string) $dataSourceId] = $file;
+
+        $this->resetValidation(['files.' . $dataSourceId]);
     }
 }
