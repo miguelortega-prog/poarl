@@ -1,6 +1,6 @@
-const FIVE_MB = 5 * 1024 * 1024;
-const MAX_CHUNK_SIZE = FIVE_MB;
-const DEFAULT_CHUNK_SIZE = FIVE_MB;
+const THIRTY_MB = 30 * 1024 * 1024;
+const DEFAULT_CHUNK_SIZE = THIRTY_MB;
+const MAX_CHUNK_SIZE = THIRTY_MB;
 
 if (typeof document !== 'undefined') {
     document.addEventListener('livewire:init', () => {
@@ -379,9 +379,7 @@ function clearUploaderState(registry, dataSourceId) {
  */
 function normalizeOptions(options) {
     const dataSourceId = Number.isFinite(options?.dataSourceId) ? Number(options.dataSourceId) : 0;
-    const chunkSize = Number.isFinite(options?.chunkSize) && options.chunkSize > 0
-        ? Math.min(options.chunkSize, MAX_CHUNK_SIZE)
-        : DEFAULT_CHUNK_SIZE;
+    const chunkSize = resolveChunkSize(options?.chunkSize);
 
     return {
         dataSourceId,
@@ -421,7 +419,7 @@ function normalizeUploadedFile(file) {
  * @param {{ file: File, uploadId: string, url: string, chunkSize: number, onProgress?: (progress: number) => void }} params
  */
 async function uploadFileInChunks(params) {
-    const size = Math.max(Math.min(params.chunkSize, MAX_CHUNK_SIZE), FIVE_MB);
+    const size = resolveChunkSize(params.chunkSize);
     const totalChunks = Math.max(1, Math.ceil(params.file.size / size));
 
     for (let index = 0; index < totalChunks; index += 1) {
@@ -478,61 +476,38 @@ async function uploadFileInChunks(params) {
     throw new Error('La respuesta del servidor no es válida.');
 }
 
-function sendChunk({ url, formData, onProgress }) {
-    return new Promise((resolve, reject) => {
-        const request = new XMLHttpRequest();
-        request.open('POST', url, true);
-        request.responseType = 'json';
-        request.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+async function sendChunk({ url, formData, onProgress }) {
+    const client = typeof window !== 'undefined' ? window.axios : null;
 
-        request.upload.onprogress = (event) => {
-            if (typeof onProgress === 'function') {
-                onProgress(event.loaded, event.lengthComputable ? event.total : 0);
-            }
-        };
-
-        request.onload = () => {
-            if (request.status >= 200 && request.status < 300) {
-                resolve(normalizeJsonResponse(request));
-
-                return;
-            }
-
-            reject(new Error(extractServerMessage(request)));
-        };
-
-        request.onerror = () => {
-            reject(new Error('No fue posible comunicarse con el servidor de cargas.'));
-        };
-
-        request.ontimeout = () => {
-            reject(new Error('La conexión con el servidor tardó demasiado. Intenta de nuevo.'));
-        };
-
-        request.send(formData);
-    });
-}
-
-function normalizeJsonResponse(request) {
-    if (request.responseType === 'json' && request.response) {
-        return request.response;
+    if (!client) {
+        throw new Error('No fue posible inicializar el cliente HTTP para la carga.');
     }
+
+    const csrfToken = readCsrfToken();
 
     try {
-        return JSON.parse(request.responseText);
+        const response = await client.post(url, formData, {
+            headers: {
+                'Content-Type': 'multipart/form-data',
+                ...(csrfToken ? { 'X-CSRF-TOKEN': csrfToken } : {}),
+            },
+            onUploadProgress: (event) => {
+                if (typeof onProgress !== 'function') {
+                    return;
+                }
+
+                const total = Number.isFinite(event?.total) ? event.total : 0;
+                const loaded = Number.isFinite(event?.loaded) ? event.loaded : 0;
+
+                onProgress(loaded, total);
+            },
+            withCredentials: true,
+        });
+
+        return response?.data ?? null;
     } catch (error) {
-        return null;
+        throw error;
     }
-}
-
-function extractServerMessage(request) {
-    const payload = normalizeJsonResponse(request);
-
-    if (payload && typeof payload.message === 'string' && payload.message.trim() !== '') {
-        return payload.message;
-    }
-
-    return 'El servidor rechazó la carga del archivo.';
 }
 
 function extractErrorMessage(error) {
@@ -574,6 +549,22 @@ function generateUploadId() {
     return `upload-${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
 }
 
+function readCsrfToken() {
+    if (typeof document === 'undefined') {
+        return null;
+    }
+
+    const element = document.querySelector('meta[name="csrf-token"]');
+
+    if (!element) {
+        return null;
+    }
+
+    const content = element.getAttribute('content');
+
+    return typeof content === 'string' && content.trim() !== '' ? content : null;
+}
+
 function clamp(value, minimum, maximum) {
     if (!Number.isFinite(value)) {
         return minimum;
@@ -588,4 +579,18 @@ function clamp(value, minimum, maximum) {
     }
 
     return Math.min(Math.max(value, minimum), maximum);
+}
+
+function resolveChunkSize(value) {
+    if (!Number.isFinite(value)) {
+        return DEFAULT_CHUNK_SIZE;
+    }
+
+    const numericValue = Number(value);
+
+    if (numericValue <= 0) {
+        return DEFAULT_CHUNK_SIZE;
+    }
+
+    return Math.min(Math.max(numericValue, DEFAULT_CHUNK_SIZE), MAX_CHUNK_SIZE);
 }

@@ -395,7 +395,7 @@ class CreateRunModal extends Component
             $normalizedFiles[(int) $key] = $file;
         }
 
-        $dto = new CreateCollectionNoticeRunDto (
+        $dto = new CreateCollectionNoticeRunDto(
             collectionNoticeTypeId: (int) $this->typeId,
             periodValue: (string) ($this->periodValue ?: $this->period),
             requestedById: $userId,
