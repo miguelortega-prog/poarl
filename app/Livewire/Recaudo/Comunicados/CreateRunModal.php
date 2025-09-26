@@ -330,8 +330,9 @@ class CreateRunModal extends Component
     }
 
     #[On('chunk-uploading')]
-    public function handleChunkUploading(array $payload): void
+    public function handleChunkUploading(?array $payload = null): void
     {
+        $payload ??= [];
         $dataSourceId = isset($payload['dataSourceId']) ? (int) $payload['dataSourceId'] : 0;
 
         if ($dataSourceId <= 0) {
@@ -342,8 +343,9 @@ class CreateRunModal extends Component
     }
 
     #[On('chunk-uploaded')]
-    public function handleChunkUploaded(array $payload): void
+    public function handleChunkUploaded(?array $payload = null): void
     {
+        $payload ??= [];
         $dataSourceId = isset($payload['dataSourceId']) ? (int) $payload['dataSourceId'] : 0;
         $file = $payload['file'] ?? null;
 
