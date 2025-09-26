@@ -64,6 +64,12 @@ return [
             'root' => storage_path('app/collection'),
             'throw' => true,
         ],
+
+        'collection_temp' => [
+            'driver' => 'local',
+            'root' => storage_path('app/collection_tmp'),
+            'throw' => true,
+        ],
     ],
 
     /*

@@ -19,7 +19,6 @@ final class CollectionNoticeRunFileEloquentRepository implements CollectionNotic
             'size'                     => $file->size,
             'mime'                     => $file->mime,
             'ext'                      => $file->ext,
-            'sha256'                   => $file->sha256,
             'uploaded_by'              => $file->uploadedBy,
         ]);
     }
