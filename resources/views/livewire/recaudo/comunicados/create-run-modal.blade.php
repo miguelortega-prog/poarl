@@ -128,7 +128,7 @@
                                                     </div>
 
                                                     <div x-show="isUploading" x-cloak class="h-2 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
-                                                        <div class="h-full bg-primary-500 transition-all duration-200 ease-linear" :style="`width: ${progress}%`"></div>
+                                                        <div class="h-full bg-primary-500 transition-all duration-200 ease-linear" :style="progressStyle()"></div>
                                                     </div>
 
                                                     <p x-show="status === 'error' && errorMessage" x-cloak class="text-xs font-semibold text-danger" x-text="errorMessage"></p>

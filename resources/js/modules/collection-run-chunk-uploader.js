@@ -1,6 +1,7 @@
 import axios from 'axios';
 
-const DEFAULT_CHUNK_SIZE = 5 * 1024 * 1024;
+const MAX_CHUNK_SIZE = 50 * 1024 * 1024;
+const DEFAULT_CHUNK_SIZE = MAX_CHUNK_SIZE;
 
 if (typeof document !== 'undefined') {
     document.addEventListener('livewire:init', () => {
@@ -76,7 +77,7 @@ export function collectionRunUploader(options) {
             this.fileData = null;
             this.fileName = file.name;
             this.fileSize = file.size;
-            this.progress = 0;
+            this.updateProgress(0);
             this.isUploading = true;
             this.status = 'uploading';
             this.uploadId = generateUploadId();
@@ -103,14 +104,13 @@ export function collectionRunUploader(options) {
                     url: this.uploadUrl,
                     chunkSize: this.chunkSize,
                     onProgress: (value) => {
-                        this.progress = value;
-                        this.persistState(stateRegistry);
+                        this.updateProgress(value);
                     },
                 });
 
                 this.isUploading = false;
                 this.status = 'completed';
-                this.progress = 100;
+                this.updateProgress(100);
 
                 const uploadedFile = normalizeUploadedFile(response.file ?? null);
 
@@ -133,7 +133,7 @@ export function collectionRunUploader(options) {
             } catch (error) {
                 this.isUploading = false;
                 this.status = 'error';
-                this.progress = 0;
+                this.updateProgress(0);
 
                 const message = extractErrorMessage(error);
                 this.errorMessage = message;
@@ -160,7 +160,7 @@ export function collectionRunUploader(options) {
             this.fileName = file.original_name;
             this.fileSize = file.size;
             this.status = 'completed';
-            this.progress = 100;
+            this.updateProgress(100);
             this.isUploading = false;
             this.errorMessage = '';
             this.persistState(stateRegistry);
@@ -170,7 +170,7 @@ export function collectionRunUploader(options) {
             this.fileData = null;
             this.fileName = '';
             this.fileSize = 0;
-            this.progress = 0;
+            this.updateProgress(0);
             this.isUploading = false;
             this.status = 'idle';
             this.errorMessage = '';
@@ -254,7 +254,7 @@ export function collectionRunUploader(options) {
             this.fileData = saved.fileData;
             this.fileName = saved.fileName;
             this.fileSize = saved.fileSize;
-            this.progress = saved.progress;
+            this.progress = clamp(saved.progress, 0, 100);
             this.isUploading = saved.isUploading;
             this.status = saved.status;
             this.errorMessage = saved.errorMessage;
@@ -280,8 +280,31 @@ export function collectionRunUploader(options) {
             });
         },
 
+        progressStyle() {
+            const width = Number.isFinite(this.progress) ? clamp(this.progress, 0, 100) : 0;
+
+            return `width: ${width.toFixed(2)}%`;
+        },
+
         clearState(registry) {
             clearUploaderState(registry, this.dataSourceId);
+        },
+
+        updateProgress(value) {
+            if (!Number.isFinite(value)) {
+                return;
+            }
+
+            const normalized = clamp(value, 0, 100);
+
+            if (normalized === this.progress) {
+                this.persistState(stateRegistry);
+
+                return;
+            }
+
+            this.progress = normalized;
+            this.persistState(stateRegistry);
         },
     };
 }
@@ -358,7 +381,7 @@ function clearUploaderState(registry, dataSourceId) {
 function normalizeOptions(options) {
     const dataSourceId = Number.isFinite(options?.dataSourceId) ? Number(options.dataSourceId) : 0;
     const chunkSize = Number.isFinite(options?.chunkSize) && options.chunkSize > 0
-        ? Math.min(options.chunkSize, DEFAULT_CHUNK_SIZE)
+        ? Math.min(options.chunkSize, MAX_CHUNK_SIZE)
         : DEFAULT_CHUNK_SIZE;
 
     return {
@@ -491,4 +514,20 @@ function generateUploadId() {
     }
 
     return `upload-${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+}
+
+function clamp(value, minimum, maximum) {
+    if (!Number.isFinite(value)) {
+        return minimum;
+    }
+
+    if (!Number.isFinite(minimum) || !Number.isFinite(maximum)) {
+        return value;
+    }
+
+    if (minimum > maximum) {
+        return clamp(value, maximum, minimum);
+    }
+
+    return Math.min(Math.max(value, minimum), maximum);
 }
