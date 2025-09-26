@@ -146,41 +146,25 @@
                                                     id="file-{{ $dataSource['id'] }}"
                                                     name="files[{{ $dataSource['id'] }}]"
                                                     type="file"
-                                                    wire:model.live="files.{{ $dataSource['id'] }}"
                                                     x-ref="fileInput"
+                                                    @change="handleFileSelected($event)"
+                                                    :disabled="isUploading"
                                                     class="sr-only"
                                                 />
                                             </label>
 
-                                            <div x-show="isUploading" x-cloak class="space-y-1">
-                                                <div class="h-2 w-full rounded-full bg-gray-200 dark:bg-gray-700">
-                                                    <div
-                                                        class="h-2 rounded-full bg-primary-500 transition-all duration-200 ease-linear"
-                                                        :style="`width: ${progress}%`"
-                                                    ></div>
+                                            <div x-show="fileName" x-cloak class="space-y-1">
+                                                <div class="flex w-full items-center justify-between gap-2 rounded-3xl bg-gray-100 px-3 py-2 text-xs text-gray-700 dark:bg-gray-800 dark:text-gray-300">
+                                                    <span class="max-w-[70%] truncate" x-text="fileName"></span>
+                                                    <span class="whitespace-nowrap" x-text="progressLabel()"></span>
                                                 </div>
-                                                <p class="text-xs font-semibold text-gray-600 dark:text-gray-300">
-                                                    <span x-text="Math.round(progress)"></span>%
-                                                </p>
+
+                                                <div x-show="isUploading" x-cloak class="h-2 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
+                                                    <div class="h-full bg-primary-500 transition-all duration-200 ease-linear" :style="`width: ${progress}%`"></div>
+                                                </div>
+
+                                                <p x-show="status === 'error' && errorMessage" x-cloak class="text-xs font-semibold text-danger" x-text="errorMessage"></p>
                                             </div>
-
-                                            @if ($selectedFile)
-                                                @php
-                                                    $displayName = null;
-
-                                                    if (is_array($selectedFile)) {
-                                                        $displayName = $selectedFile['original_name'] ?? null;
-                                                    } elseif (method_exists($selectedFile, 'getClientOriginalName')) {
-                                                        $displayName = $selectedFile->getClientOriginalName();
-                                                    } else {
-                                                        $displayName = (string) $selectedFile;
-                                                    }
-                                                @endphp
-
-                                                <p class="max-w-full truncate rounded-3xl bg-gray-100 px-3 py-1 text-xs text-gray-700 dark:bg-gray-800 dark:text-gray-300">
-                                                    {{ $displayName ?: __('Archivo seleccionado') }}
-                                                </p>
-                                            @endif
 
                                             @error('files.' . $dataSource['id'])
                                                 <p class="inline-flex items-center rounded-3xl bg-danger px-3 py-1 text-xs font-semibold text-white">
