@@ -1,5 +1,9 @@
+import axios from 'axios';
+
 const FIVE_MEGABYTES = 5 * 1024 * 1024;
 const DEFAULT_CHUNK_SIZE = FIVE_MEGABYTES;
+
+let livewireChunkSizeConfigured = false;
 
 if (typeof document !== 'undefined') {
     document.addEventListener('livewire:init', () => {
@@ -7,18 +11,10 @@ if (typeof document !== 'undefined') {
     });
 }
 
-let livewireChunkSizeConfigured = false;
-
-function configureLivewireChunkSize() {
-    if (livewireChunkSizeConfigured || typeof window === 'undefined') {
-        return;
-    }
-
-    const { Livewire } = window;
-
-    if (Livewire && typeof Livewire.setUploadChunkSize === 'function') {
-        Livewire.setUploadChunkSize(DEFAULT_CHUNK_SIZE);
-        livewireChunkSizeConfigured = true;
+class UploadAbortedError extends Error {
+    constructor(message = 'La carga fue cancelada por el usuario.') {
+        super(message);
+        this.name = 'UploadAbortedError';
     }
 }
 
@@ -39,8 +35,9 @@ class ChunkedUploadSession {
         this.csrfToken = typeof csrfToken === 'string' && csrfToken !== '' ? csrfToken : null;
         this.onProgress = typeof onProgress === 'function' ? onProgress : null;
         this.totalChunks = Math.max(1, Math.ceil(this.file.size / this.chunkSize));
-        this.currentRequest = null;
+        this.currentController = null;
         this.aborted = false;
+        this.httpClient = resolveHttpClient();
     }
 
     async start() {
@@ -48,7 +45,7 @@ class ChunkedUploadSession {
 
         for (let index = 0; index < this.totalChunks; index += 1) {
             if (this.aborted) {
-                throw new Error('La carga fue cancelada por el usuario.');
+                throw new UploadAbortedError();
             }
 
             const start = index * this.chunkSize;
@@ -74,9 +71,9 @@ class ChunkedUploadSession {
     abort() {
         this.aborted = true;
 
-        if (this.currentRequest) {
-            this.currentRequest.abort();
-            this.currentRequest = null;
+        if (this.currentController) {
+            this.currentController.abort();
+            this.currentController = null;
         }
     }
 
@@ -101,75 +98,57 @@ class ChunkedUploadSession {
         return formData;
     }
 
-    sendChunk({ formData, chunkIndex, chunkSizeBytes }) {
+    async sendChunk({ formData, chunkIndex, chunkSizeBytes }) {
         const safeChunkSize = Number.isFinite(chunkSizeBytes) && chunkSizeBytes > 0
             ? chunkSizeBytes
             : this.chunkSize;
 
-        return new Promise((resolve, reject) => {
-            const request = new XMLHttpRequest();
-            this.currentRequest = request;
+        const previousBytes = chunkIndex * this.chunkSize;
+        const totalBytes = this.file.size > 0
+            ? this.file.size
+            : Math.max(this.totalChunks * this.chunkSize, 1);
 
-            request.open('POST', this.uploadUrl, true);
-            request.withCredentials = true;
+        const controller = new AbortController();
+        this.currentController = controller;
 
-            if (this.csrfToken) {
-                request.setRequestHeader('X-CSRF-TOKEN', this.csrfToken);
+        try {
+            const response = await this.httpClient.post(this.uploadUrl, formData, {
+                signal: controller.signal,
+                withCredentials: true,
+                headers: this.csrfToken
+                    ? { 'X-CSRF-TOKEN': this.csrfToken }
+                    : undefined,
+                onUploadProgress: (event) => {
+                    if (!this.onProgress) {
+                        return;
+                    }
+
+                    const loaded = Number.isFinite(event.loaded) ? event.loaded : safeChunkSize;
+                    const currentBytes = Math.min(previousBytes + loaded, totalBytes);
+                    const progress = Math.min((currentBytes / totalBytes) * 100, 100);
+
+                    this.onProgress(progress);
+                },
+            });
+
+            if (this.onProgress) {
+                const completedBytes = Math.min(previousBytes + safeChunkSize, totalBytes);
+                const finalProgress = Math.min((completedBytes / totalBytes) * 100, 100);
+                this.onProgress(finalProgress);
             }
 
-            request.upload.onprogress = (event) => {
-                if (!this.onProgress) {
-                    return;
-                }
+            return response?.data ?? {};
+        } catch (error) {
+            if (controller.signal.aborted || isAxiosCancellation(error)) {
+                throw new UploadAbortedError();
+            }
 
-                const loaded = Number.isFinite(event.loaded) ? event.loaded : 0;
-                const total = Number.isFinite(event.total) && event.total > 0 ? event.total : safeChunkSize;
-                const previousBytes = chunkIndex * this.chunkSize;
-                const computedTotal = this.file.size > 0
-                    ? this.file.size
-                    : Math.max(this.totalChunks * this.chunkSize, 1);
-                const currentBytes = Math.min(previousBytes + loaded, computedTotal);
-                const progress = Math.min((currentBytes / computedTotal) * 100, 100);
-
-                this.onProgress(progress);
-            };
-
-            request.onerror = () => {
-                reject(new Error('No fue posible comunicarse con el servidor de cargas.'));
-            };
-
-            request.onreadystatechange = () => {
-                if (request.readyState !== XMLHttpRequest.DONE) {
-                    return;
-                }
-
-                this.currentRequest = null;
-
-                if (request.status >= 200 && request.status < 300) {
-                    try {
-                        const responseData = parseJsonSafely(request.responseText);
-
-                        if (this.onProgress) {
-                            const completedBytes = safeChunkSize;
-                            const totalBytes = this.file.size > 0
-                                ? this.file.size
-                                : Math.max(this.totalChunks * this.chunkSize, 1);
-                            const exactBytes = Math.min((chunkIndex * this.chunkSize) + completedBytes, totalBytes);
-                            const finalProgress = Math.min((exactBytes / totalBytes) * 100, 100);
-                            this.onProgress(finalProgress);
-                        }
-
-                        resolve(responseData);
-                    } catch (error) {
-                        reject(error);
-                    }
-                } else {
-                    reject(new Error('El servidor rechazó la carga del fragmento.'));
-                }
-            };
-
-            request.send(formData);
-        });
+            throw normalizeAxiosError(error);
+        } finally {
+            if (this.currentController === controller) {
+                this.currentController = null;
+            }
+        }
     }
 }
 
@@ -262,10 +241,17 @@ export function collectionRunUploader(options) {
                     file: uploadedFile,
                 });
             } catch (error) {
-                this.status = 'error';
-                this.progress = 0;
-                this.errorMessage = extractErrorMessage(error);
-                this.fileData = null;
+                if (isUploadAbortedError(error)) {
+                    this.status = 'idle';
+                    this.progress = 0;
+                    this.errorMessage = '';
+                    this.fileData = null;
+                } else {
+                    this.status = 'error';
+                    this.progress = 0;
+                    this.errorMessage = extractErrorMessage(error);
+                    this.fileData = null;
+                }
             } finally {
                 this.isUploading = false;
                 this.currentSession = null;
@@ -315,7 +301,9 @@ export function collectionRunUploader(options) {
                 return;
             }
 
-            this.progress = clamp(value, 0, 100);
+            const normalized = clamp(value, 0, 100);
+            console.log('Progress update:', normalized);
+            this.progress = normalized;
         },
 
         cancelOngoingUpload() {
@@ -423,16 +411,16 @@ function normalizeUploadedFile(file) {
     };
 }
 
-function parseJsonSafely(payload) {
-    if (payload === undefined || payload === null || payload === '') {
-        return {};
+function normalizeAxiosError(error) {
+    if (error?.response?.data?.message) {
+        return new Error(String(error.response.data.message));
     }
 
-    try {
-        return JSON.parse(payload);
-    } catch (error) {
-        throw new Error('La respuesta del servidor no es un JSON válido.');
+    if (typeof error?.message === 'string' && error.message.trim() !== '') {
+        return new Error(error.message);
     }
+
+    return new Error('No fue posible cargar el archivo. Intenta de nuevo.');
 }
 
 function extractErrorMessage(error) {
@@ -489,7 +477,20 @@ function resolveChunkSize(value) {
         return DEFAULT_CHUNK_SIZE;
     }
 
-    return Math.min(Math.max(numericValue, DEFAULT_CHUNK_SIZE), DEFAULT_CHUNK_SIZE);
+    return Math.max(Math.min(numericValue, DEFAULT_CHUNK_SIZE), DEFAULT_CHUNK_SIZE);
+}
+
+function configureLivewireChunkSize() {
+    if (livewireChunkSizeConfigured || typeof window === 'undefined') {
+        return;
+    }
+
+    const { Livewire } = window;
+
+    if (Livewire && typeof Livewire.setUploadChunkSize === 'function') {
+        Livewire.setUploadChunkSize(DEFAULT_CHUNK_SIZE);
+        livewireChunkSizeConfigured = true;
+    }
 }
 
 function generateUploadId() {
@@ -522,4 +523,28 @@ function getFileExtension(filename) {
     }
 
     return filename.split('.').pop().toLowerCase();
+}
+
+function resolveHttpClient() {
+    if (typeof window !== 'undefined' && window.axios) {
+        return window.axios;
+    }
+
+    return axios;
+}
+
+function isAxiosCancellation(error) {
+    if (error?.code === 'ERR_CANCELED' || error?.message === 'canceled') {
+        return true;
+    }
+
+    if (error instanceof DOMException && error.name === 'AbortError') {
+        return true;
+    }
+
+    return false;
+}
+
+function isUploadAbortedError(error) {
+    return error instanceof UploadAbortedError || error?.name === 'UploadAbortedError';
 }
