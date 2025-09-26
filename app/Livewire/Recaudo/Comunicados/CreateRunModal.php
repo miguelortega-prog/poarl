@@ -197,6 +197,40 @@ class CreateRunModal extends Component
         }
     }
 
+    #[On('collection-run::chunkUploading')]
+    public function handleChunkUploading(int $dataSourceId): void
+    {
+        if ($dataSourceId <= 0) {
+            return;
+        }
+
+        $key = (string) $dataSourceId;
+
+        unset($this->files[$key]);
+
+        $this->resetValidation(['files.' . $key]);
+    }
+
+    #[On('collection-run::chunkUploaded')]
+    public function handleChunkUploaded(int $dataSourceId, array $file): void
+    {
+        if ($dataSourceId <= 0) {
+            return;
+        }
+
+        $key = (string) $dataSourceId;
+
+        $uploadedFile = TemporaryUploadedFile::unserializeFromLivewireRequest($file);
+
+        if (! $uploadedFile instanceof TemporaryUploadedFile) {
+            return;
+        }
+
+        $this->files[$key] = $uploadedFile;
+
+        $this->resetValidation(['files.' . $key]);
+    }
+
     protected function rules(): array
     {
         $rules = [
