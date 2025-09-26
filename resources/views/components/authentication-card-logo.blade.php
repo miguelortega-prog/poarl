@@ -2,6 +2,6 @@
     <img
         src="{{ asset('images/LOGO-ARL.png') }}"
         alt="Seguros Bolívar"
-        class="h-16 w-auto"
+        class="h-24 w-auto"
     >
 </a>
