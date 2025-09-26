@@ -53,8 +53,8 @@ class CreateRunModal extends Component
             'period.required' => 'Debes ingresar el periodo en formato YYYYMM.',
             'period.regex' => 'El periodo debe tener formato YYYYMM.',
             'files.*.required' => 'Debes adjuntar el archivo correspondiente a este insumo.',
-            'files.*.file' => 'Adjunta un archivo válido.',
-            'files.*.max' => 'El archivo supera el tamaño máximo permitido (500 MB).',
+            //'files.*.file' => 'Adjunta un archivo válido.',
+            //'files.*.max' => 'El archivo supera el tamaño máximo permitido (500 MB).',
         ];
 
         foreach ($this->dataSources as $dataSource) {
