@@ -1,7 +1,6 @@
-import axios from 'axios';
-
-const MAX_CHUNK_SIZE = 50 * 1024 * 1024;
-const DEFAULT_CHUNK_SIZE = MAX_CHUNK_SIZE;
+const FIVE_MB = 5 * 1024 * 1024;
+const MAX_CHUNK_SIZE = FIVE_MB;
+const DEFAULT_CHUNK_SIZE = FIVE_MB;
 
 if (typeof document !== 'undefined') {
     document.addEventListener('livewire:init', () => {
@@ -144,11 +143,11 @@ export function collectionRunUploader(options) {
         },
 
         progressLabel() {
-            if (this.isUploading) {
+            if (this.isUploading || this.status === 'completed') {
                 return `${Math.round(this.progress)}%`;
             }
 
-            if (this.status === 'completed' && this.fileSize) {
+            if (this.fileSize) {
                 return humanFileSize(this.fileSize);
             }
 
@@ -303,7 +302,7 @@ export function collectionRunUploader(options) {
                 return;
             }
 
-            this.progress = normalized;
+            this.progress = normalized > this.progress ? normalized : this.progress;
             this.persistState(stateRegistry);
         },
     };
@@ -422,7 +421,7 @@ function normalizeUploadedFile(file) {
  * @param {{ file: File, uploadId: string, url: string, chunkSize: number, onProgress?: (progress: number) => void }} params
  */
 async function uploadFileInChunks(params) {
-    const size = Math.max(params.chunkSize, 512 * 1024);
+    const size = Math.max(Math.min(params.chunkSize, MAX_CHUNK_SIZE), FIVE_MB);
     const totalChunks = Math.max(1, Math.ceil(params.file.size / size));
 
     for (let index = 0; index < totalChunks; index += 1) {
@@ -447,21 +446,23 @@ async function uploadFileInChunks(params) {
             }
         }
 
-        const response = await axios.post(params.url, formData, {
-            headers: {
-                'X-Requested-With': 'XMLHttpRequest',
-            },
-            onUploadProgress: (event) => {
-                if (!event.total) {
+        const response = await sendChunk({
+            url: params.url,
+            formData,
+            onProgress: (loaded, total) => {
+                if (typeof params.onProgress !== 'function') {
                     return;
                 }
 
-                const chunkProgress = event.loaded / event.total;
-                const globalProgress = ((index + chunkProgress) / totalChunks) * 100;
+                if (!total) {
+                    params.onProgress(((index + 0.0001) / totalChunks) * 100);
 
-                if (typeof params.onProgress === 'function') {
-                    params.onProgress(Math.min(globalProgress, 100));
+                    return;
                 }
+
+                const chunkProgress = loaded / total;
+                const globalProgress = ((index + chunkProgress) / totalChunks) * 100;
+                params.onProgress(Math.min(globalProgress, 100));
             },
         });
 
@@ -469,12 +470,69 @@ async function uploadFileInChunks(params) {
             params.onProgress(((index + 1) / totalChunks) * 100);
         }
 
-        if (response?.data?.completed) {
-            return response.data;
+        if (response?.completed) {
+            return response;
         }
     }
 
     throw new Error('La respuesta del servidor no es válida.');
+}
+
+function sendChunk({ url, formData, onProgress }) {
+    return new Promise((resolve, reject) => {
+        const request = new XMLHttpRequest();
+        request.open('POST', url, true);
+        request.responseType = 'json';
+        request.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+
+        request.upload.onprogress = (event) => {
+            if (typeof onProgress === 'function') {
+                onProgress(event.loaded, event.lengthComputable ? event.total : 0);
+            }
+        };
+
+        request.onload = () => {
+            if (request.status >= 200 && request.status < 300) {
+                resolve(normalizeJsonResponse(request));
+
+                return;
+            }
+
+            reject(new Error(extractServerMessage(request)));
+        };
+
+        request.onerror = () => {
+            reject(new Error('No fue posible comunicarse con el servidor de cargas.'));
+        };
+
+        request.ontimeout = () => {
+            reject(new Error('La conexión con el servidor tardó demasiado. Intenta de nuevo.'));
+        };
+
+        request.send(formData);
+    });
+}
+
+function normalizeJsonResponse(request) {
+    if (request.responseType === 'json' && request.response) {
+        return request.response;
+    }
+
+    try {
+        return JSON.parse(request.responseText);
+    } catch (error) {
+        return null;
+    }
+}
+
+function extractServerMessage(request) {
+    const payload = normalizeJsonResponse(request);
+
+    if (payload && typeof payload.message === 'string' && payload.message.trim() !== '') {
+        return payload.message;
+    }
+
+    return 'El servidor rechazó la carga del archivo.';
 }
 
 function extractErrorMessage(error) {
