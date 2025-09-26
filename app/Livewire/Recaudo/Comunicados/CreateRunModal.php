@@ -12,6 +12,7 @@ use Livewire\Attributes\On;
 use Livewire\Component;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 use Livewire\WithFileUploads;
+use Throwable;
 
 class CreateRunModal extends Component
 {
@@ -223,7 +224,17 @@ class CreateRunModal extends Component
 
         $key = (string) $dataSourceId;
 
-        $uploadedFile = TemporaryUploadedFile::unserializeFromLivewireRequest($file);
+        try {
+            $uploadedFile = TemporaryUploadedFile::unserializeFromLivewireRequest($file);
+        } catch (Throwable $exception) {
+            $this->logChunkActivity('uploaded_exception', $dataSourceId, [
+                'exception_class' => $exception::class,
+                'exception_message' => $exception->getMessage(),
+                'payload_keys' => array_keys($file),
+            ]);
+
+            throw $exception;
+        }
 
         if (! $uploadedFile instanceof TemporaryUploadedFile) {
             $this->logChunkActivity('uploaded_invalid', $dataSourceId, [
