@@ -88,7 +88,45 @@
                                             {{ $dataSource['extension'] ? strtoupper($dataSource['extension']) : __('N/A') }}
                                         </div>
 
-                                        <div class="col-span-12 space-y-2 tablet:col-span-3 desktop:col-span-3">
+                                        <div
+                                            class="col-span-12 space-y-2 tablet:col-span-3 desktop:col-span-3"
+                                            x-data="{
+                                                isUploading: false,
+                                                progress: 0,
+                                                shouldHandle(event) {
+                                                    return event && event.target === this.$refs.fileInput;
+                                                },
+                                                handleStart(event) {
+                                                    if (! this.shouldHandle(event)) {
+                                                        return;
+                                                    }
+
+                                                    this.isUploading = true;
+                                                    this.progress = 0;
+                                                },
+                                                handleFinish(event) {
+                                                    if (! this.shouldHandle(event)) {
+                                                        return;
+                                                    }
+
+                                                    this.isUploading = false;
+                                                    this.progress = 0;
+                                                },
+                                                handleProgress(event) {
+                                                    if (! this.shouldHandle(event)) {
+                                                        return;
+                                                    }
+
+                                                    this.progress = event.detail && typeof event.detail.progress === 'number'
+                                                        ? event.detail.progress
+                                                        : 0;
+                                                },
+                                            }"
+                                            x-on:livewire-upload-start="handleStart($event)"
+                                            x-on:livewire-upload-finish="handleFinish($event)"
+                                            x-on:livewire-upload-error="handleFinish($event)"
+                                            x-on:livewire-upload-progress="handleProgress($event)"
+                                        >
                                             <label
                                                 for="file-{{ $dataSource['id'] }}"
                                                 class="inline-flex w-full items-center justify-center gap-2 rounded-3xl border border-primary-300 bg-white px-4 py-2 text-sm font-semibold text-primary-900 shadow-sm transition hover:border-primary-500 hover:bg-primary-200/60 focus-within:ring-2 focus-within:ring-primary-500 focus-within:ring-offset-2 focus-within:ring-offset-white dark:border-gray-600 dark:bg-gray-900 dark:text-primary-200 dark:focus-within:ring-offset-gray-900 tablet:w-auto"
@@ -100,9 +138,22 @@
                                                     name="files[{{ $dataSource['id'] }}]"
                                                     type="file"
                                                     wire:model.live="files.{{ $dataSource['id'] }}"
+                                                    x-ref="fileInput"
                                                     class="sr-only"
                                                 />
                                             </label>
+
+                                            <div x-show="isUploading" x-cloak class="space-y-1">
+                                                <div class="h-2 w-full rounded-full bg-gray-200 dark:bg-gray-700">
+                                                    <div
+                                                        class="h-2 rounded-full bg-primary-500 transition-all duration-200 ease-linear"
+                                                        :style="`width: ${progress}%`"
+                                                    ></div>
+                                                </div>
+                                                <p class="text-xs font-semibold text-gray-600 dark:text-gray-300">
+                                                    <span x-text="Math.round(progress)"></span>%
+                                                </p>
+                                            </div>
 
                                             @if ($selectedFile)
                                                 <p class="max-w-full truncate rounded-3xl bg-gray-100 px-3 py-1 text-xs text-gray-700 dark:bg-gray-800 dark:text-gray-300">

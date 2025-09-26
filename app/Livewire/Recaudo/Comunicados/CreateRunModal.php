@@ -7,6 +7,7 @@ use App\Models\CollectionNoticeType;
 use App\UseCases\Recaudo\Comunicados\CreateCollectionNoticeRunUseCase;
 use Carbon\Carbon;
 use Illuminate\Contracts\View\View;
+use Illuminate\Support\Facades\Log;
 use Livewire\Attributes\On;
 use Livewire\Component;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
@@ -52,7 +53,7 @@ class CreateRunModal extends Component
             'period.regex' => 'El periodo debe tener formato YYYYMM.',
             'files.*.required' => 'Debes adjuntar el archivo correspondiente a este insumo.',
             'files.*.file' => 'Adjunta un archivo válido.',
-            'files.*.max' => 'El archivo supera el tamaño máximo permitido (10 MB).',
+            'files.*.max' => 'El archivo supera el tamaño máximo permitido (500 MB).',
         ];
 
         foreach ($this->dataSources as $dataSource) {
@@ -209,6 +210,8 @@ class CreateRunModal extends Component
         unset($this->files[$key]);
 
         $this->resetValidation(['files.' . $key]);
+
+        $this->logChunkActivity('uploading', $dataSourceId);
     }
 
     #[On('collection-run::chunkUploaded')]
@@ -223,12 +226,21 @@ class CreateRunModal extends Component
         $uploadedFile = TemporaryUploadedFile::unserializeFromLivewireRequest($file);
 
         if (! $uploadedFile instanceof TemporaryUploadedFile) {
+            $this->logChunkActivity('uploaded_invalid', $dataSourceId, [
+                'payload_keys' => array_keys($file),
+            ]);
+
             return;
         }
 
         $this->files[$key] = $uploadedFile;
 
         $this->resetValidation(['files.' . $key]);
+
+        $this->logChunkActivity('uploaded', $dataSourceId, [
+            'temporary_filename' => $uploadedFile->getFilename(),
+            'filesize' => $uploadedFile->getSize(),
+        ]);
     }
 
     protected function rules(): array
@@ -259,7 +271,7 @@ class CreateRunModal extends Component
                 'required',
                 'file',
                 'mimes:' . $this->mimesFromExtension($extension),
-                'max:10240',
+                'max:512000',
             ];
         }
 
@@ -353,5 +365,16 @@ class CreateRunModal extends Component
             'xlsx' => 'xlsx,xls',
             default => 'csv,xls,xlsx',
         };
+    }
+
+    protected function logChunkActivity(string $event, int $dataSourceId, array $context = []): void
+    {
+        Log::info(
+            sprintf('Collection notice chunk %s', $event),
+            array_merge([
+                'component' => static::class,
+                'data_source_id' => $dataSourceId,
+            ], $context),
+        );
     }
 }
