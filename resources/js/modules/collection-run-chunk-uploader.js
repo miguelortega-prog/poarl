@@ -2,13 +2,15 @@ import axios from 'axios';
 
 const DEFAULT_CHUNK_SIZE = 5 * 1024 * 1024;
 
-document.addEventListener('livewire:init', () => {
-    const { Livewire } = window;
+if (typeof document !== 'undefined') {
+    document.addEventListener('livewire:init', () => {
+        const { Livewire } = window;
 
-    if (Livewire && typeof Livewire.setUploadChunkSize === 'function') {
-        Livewire.setUploadChunkSize(DEFAULT_CHUNK_SIZE);
-    }
-});
+        if (Livewire && typeof Livewire.setUploadChunkSize === 'function') {
+            Livewire.setUploadChunkSize(DEFAULT_CHUNK_SIZE);
+        }
+    });
+}
 
 /**
  * @typedef {Object} UploadedFilePayload
@@ -32,6 +34,7 @@ document.addEventListener('livewire:init', () => {
  */
 export function collectionRunUploader(options) {
     const sanitizedOptions = normalizeOptions(options);
+    const stateRegistry = ensureUploaderStateRegistry();
 
     return {
         dataSourceId: sanitizedOptions.dataSourceId,
@@ -48,8 +51,12 @@ export function collectionRunUploader(options) {
         wireWatcherStop: null,
 
         init() {
-            if (this.fileData) {
-                this.applyUploadedFile(this.fileData);
+            this.restoreState(stateRegistry);
+
+            if (sanitizedOptions.initialFile) {
+                this.applyUploadedFile(sanitizedOptions.initialFile);
+            } else {
+                this.persistState(stateRegistry);
             }
 
             this.registerWireWatcher();
@@ -66,12 +73,15 @@ export function collectionRunUploader(options) {
             this.resetInput(input);
 
             this.errorMessage = '';
+            this.fileData = null;
             this.fileName = file.name;
             this.fileSize = file.size;
             this.progress = 0;
             this.isUploading = true;
             this.status = 'uploading';
             this.uploadId = generateUploadId();
+
+            this.persistState(stateRegistry);
 
             this.notifyLivewire('collection-run::chunkUploading', { dataSourceId: this.dataSourceId });
             this.notifyLivewire('chunk-uploading', { dataSourceId: this.dataSourceId });
@@ -81,6 +91,7 @@ export function collectionRunUploader(options) {
                 this.status = 'error';
                 this.errorMessage = 'No se encontró el endpoint de carga. Comunícate con soporte.';
                 this.notifyLivewire('toast', { type: 'error', message: this.errorMessage });
+                this.persistState(stateRegistry);
 
                 return;
             }
@@ -93,6 +104,7 @@ export function collectionRunUploader(options) {
                     chunkSize: this.chunkSize,
                     onProgress: (value) => {
                         this.progress = value;
+                        this.persistState(stateRegistry);
                     },
                 });
 
@@ -107,6 +119,7 @@ export function collectionRunUploader(options) {
                 }
 
                 this.applyUploadedFile(uploadedFile);
+                this.persistState(stateRegistry);
 
                 this.notifyLivewire('collection-run::chunkUploaded', {
                     dataSourceId: this.dataSourceId,
@@ -126,6 +139,7 @@ export function collectionRunUploader(options) {
                 this.errorMessage = message;
 
                 this.notifyLivewire('toast', { type: 'error', message });
+                this.persistState(stateRegistry);
             }
         },
 
@@ -148,6 +162,8 @@ export function collectionRunUploader(options) {
             this.status = 'completed';
             this.progress = 100;
             this.isUploading = false;
+            this.errorMessage = '';
+            this.persistState(stateRegistry);
         },
 
         clearUploadedFile() {
@@ -159,6 +175,7 @@ export function collectionRunUploader(options) {
             this.status = 'idle';
             this.errorMessage = '';
             this.uploadId = null;
+            this.clearState(stateRegistry);
         },
 
         registerWireWatcher() {
@@ -209,6 +226,8 @@ export function collectionRunUploader(options) {
                 this.wireWatcherStop();
                 this.wireWatcherStop = null;
             }
+
+            this.persistState(stateRegistry);
         },
 
         resetInput(input) {
@@ -224,7 +243,113 @@ export function collectionRunUploader(options) {
                 Livewire.dispatch(eventName, payload);
             }
         },
+
+        restoreState(registry) {
+            const saved = readUploaderState(registry, this.dataSourceId);
+
+            if (!saved) {
+                return;
+            }
+
+            this.fileData = saved.fileData;
+            this.fileName = saved.fileName;
+            this.fileSize = saved.fileSize;
+            this.progress = saved.progress;
+            this.isUploading = saved.isUploading;
+            this.status = saved.status;
+            this.errorMessage = saved.errorMessage;
+            this.uploadId = saved.uploadId;
+        },
+
+        persistState(registry) {
+            if (!this.isUploading && !this.fileData && this.fileName === '') {
+                clearUploaderState(registry, this.dataSourceId);
+
+                return;
+            }
+
+            writeUploaderState(registry, this.dataSourceId, {
+                fileData: this.fileData,
+                fileName: this.fileName,
+                fileSize: this.fileSize,
+                progress: this.progress,
+                isUploading: this.isUploading,
+                status: this.status,
+                errorMessage: this.errorMessage,
+                uploadId: this.uploadId,
+            });
+        },
+
+        clearState(registry) {
+            clearUploaderState(registry, this.dataSourceId);
+        },
     };
+}
+
+function ensureUploaderStateRegistry() {
+    if (typeof window === 'undefined') {
+        return new Map();
+    }
+
+    const key = '__collectionRunUploaderState__';
+    const existing = window[key];
+
+    if (existing instanceof Map) {
+        return existing;
+    }
+
+    const registry = new Map();
+    window[key] = registry;
+
+    return registry;
+}
+
+function readUploaderState(registry, dataSourceId) {
+    const key = String(dataSourceId);
+
+    if (!registry.has(key)) {
+        return null;
+    }
+
+    const state = registry.get(key);
+
+    if (!state || typeof state !== 'object') {
+        return null;
+    }
+
+    return {
+        fileData: normalizeUploadedFile(state.fileData ?? null),
+        fileName: typeof state.fileName === 'string' ? state.fileName : '',
+        fileSize: Number.isFinite(state.fileSize) ? Number(state.fileSize) : 0,
+        progress: Number.isFinite(state.progress) ? Number(state.progress) : 0,
+        isUploading: Boolean(state.isUploading),
+        status: typeof state.status === 'string' ? state.status : 'idle',
+        errorMessage: typeof state.errorMessage === 'string' ? state.errorMessage : '',
+        uploadId: typeof state.uploadId === 'string' ? state.uploadId : null,
+    };
+}
+
+function writeUploaderState(registry, dataSourceId, state) {
+    const key = String(dataSourceId);
+
+    registry.set(key, {
+        fileData: normalizeUploadedFile(state.fileData ?? null),
+        fileName: typeof state.fileName === 'string' ? state.fileName : '',
+        fileSize: Number.isFinite(state.fileSize) ? Number(state.fileSize) : 0,
+        progress: Number.isFinite(state.progress) ? Number(state.progress) : 0,
+        isUploading: Boolean(state.isUploading),
+        status: typeof state.status === 'string' ? state.status : 'idle',
+        errorMessage: typeof state.errorMessage === 'string' ? state.errorMessage : '',
+        uploadId: typeof state.uploadId === 'string' ? state.uploadId : null,
+    });
+}
+
+function clearUploaderState(registry, dataSourceId) {
+    const key = String(dataSourceId);
+
+    if (registry.has(key)) {
+        registry.delete(key);
+    }
 }
 
 /**
