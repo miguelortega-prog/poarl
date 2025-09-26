@@ -45,11 +45,14 @@ export function collectionRunUploader(options) {
         status: sanitizedOptions.initialFile ? 'completed' : 'idle',
         errorMessage: '',
         uploadId: null,
+        wireWatcherStop: null,
 
         init() {
             if (this.fileData) {
                 this.applyUploadedFile(this.fileData);
             }
+
+            this.registerWireWatcher();
         },
 
         async handleFileSelected(event) {
@@ -70,7 +73,6 @@ export function collectionRunUploader(options) {
             this.status = 'uploading';
             this.uploadId = generateUploadId();
 
-            this.dispatchLifecycleEvent(input, 'livewire-upload-start');
             this.notifyLivewire('collection-run::chunkUploading', { dataSourceId: this.dataSourceId });
             this.notifyLivewire('chunk-uploading', { dataSourceId: this.dataSourceId });
 
@@ -78,7 +80,6 @@ export function collectionRunUploader(options) {
                 this.isUploading = false;
                 this.status = 'error';
                 this.errorMessage = 'No se encontró el endpoint de carga. Comunícate con soporte.';
-                this.dispatchLifecycleEvent(input, 'livewire-upload-error');
                 this.notifyLivewire('toast', { type: 'error', message: this.errorMessage });
 
                 return;
@@ -92,14 +93,12 @@ export function collectionRunUploader(options) {
                     chunkSize: this.chunkSize,
                     onProgress: (value) => {
                         this.progress = value;
-                        this.dispatchLifecycleEvent(input, 'livewire-upload-progress', { progress: value });
                     },
                 });
 
                 this.isUploading = false;
                 this.status = 'completed';
                 this.progress = 100;
-                this.dispatchLifecycleEvent(input, 'livewire-upload-finish');
 
                 const uploadedFile = normalizeUploadedFile(response.file ?? null);
 
@@ -126,7 +125,6 @@ export function collectionRunUploader(options) {
                 const message = extractErrorMessage(error);
                 this.errorMessage = message;
 
-                this.dispatchLifecycleEvent(input, 'livewire-upload-error');
                 this.notifyLivewire('toast', { type: 'error', message });
             }
         },
@@ -149,25 +147,74 @@ export function collectionRunUploader(options) {
             this.fileSize = file.size;
             this.status = 'completed';
             this.progress = 100;
+            this.isUploading = false;
+        },
+
+        clearUploadedFile() {
+            this.fileData = null;
+            this.fileName = '';
+            this.fileSize = 0;
+            this.progress = 0;
+            this.isUploading = false;
+            this.status = 'idle';
+            this.errorMessage = '';
+            this.uploadId = null;
+        },
+
+        registerWireWatcher() {
+            if (this.wireWatcherStop) {
+                return;
+            }
+
+            if (typeof this.$wire?.get !== 'function') {
+                window.requestAnimationFrame(() => {
+                    this.registerWireWatcher();
+                });
+
+                return;
+            }
+
+            this.wireWatcherStop = this.$watch(
+                () => {
+                    try {
+                        return this.$wire?.get?.(`files.${this.dataSourceId}`) ?? null;
+                    } catch (error) {
+                        console.error('No fue posible consultar el archivo cargado desde Livewire.', error);
+
+                        return null;
+                    }
+                },
+                (value) => {
+                    const normalized = normalizeUploadedFile(value);
+
+                    if (!normalized) {
+                        if (!this.isUploading && this.status !== 'error') {
+                            this.clearUploadedFile();
+                        }
+
+                        return;
+                    }
+
+                    if (this.isUploading) {
+                        return;
+                    }
+
+                    this.applyUploadedFile(normalized);
+                },
+            );
+        },
+
+        destroy() {
+            if (typeof this.wireWatcherStop === 'function') {
+                this.wireWatcherStop();
+                this.wireWatcherStop = null;
+            }
         },
 
         resetInput(input) {
             if (input instanceof HTMLInputElement) {
                 input.value = '';
             }
-        },
-
-        dispatchLifecycleEvent(element, name, detail = {}) {
-            if (!(element instanceof HTMLElement)) {
-                return;
-            }
-
-            element.dispatchEvent(
-                new CustomEvent(name, {
-                    bubbles: true,
-                    detail,
-                }),
-            );
         },
 
         notifyLivewire(eventName, payload) {
