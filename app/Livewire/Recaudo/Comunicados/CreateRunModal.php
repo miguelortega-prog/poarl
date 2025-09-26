@@ -7,8 +7,12 @@ use App\Models\CollectionNoticeType;
 use App\UseCases\Recaudo\Comunicados\CreateCollectionNoticeRunUseCase;
 use Carbon\Carbon;
 use Illuminate\Contracts\View\View;
+use Illuminate\Support\Facades\Log;
 use Livewire\Attributes\On;
 use Livewire\Component;
+use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
+use Livewire\WithFileUploads;
+use Throwable;
 
 class CreateRunModal extends Component
 {
@@ -185,6 +189,61 @@ class CreateRunModal extends Component
         }
     }
 
+    #[On('collection-run::chunkUploading')]
+    public function handleChunkUploading(int $dataSourceId): void
+    {
+        if ($dataSourceId <= 0) {
+            return;
+        }
+
+        $key = (string) $dataSourceId;
+
+        unset($this->files[$key]);
+
+        $this->resetValidation(['files.' . $key]);
+
+        $this->logChunkActivity('uploading', $dataSourceId);
+    }
+
+    #[On('collection-run::chunkUploaded')]
+    public function handleChunkUploaded(int $dataSourceId, array $file): void
+    {
+        if ($dataSourceId <= 0) {
+            return;
+        }
+
+        $key = (string) $dataSourceId;
+
+        try {
+            $uploadedFile = TemporaryUploadedFile::unserializeFromLivewireRequest($file);
+        } catch (Throwable $exception) {
+            $this->logChunkActivity('uploaded_exception', $dataSourceId, [
+                'exception_class' => $exception::class,
+                'exception_message' => $exception->getMessage(),
+                'payload_keys' => array_keys($file),
+            ]);
+
+            throw $exception;
+        }
+
+        if (! $uploadedFile instanceof TemporaryUploadedFile) {
+            $this->logChunkActivity('uploaded_invalid', $dataSourceId, [
+                'payload_keys' => array_keys($file),
+            ]);
+
+            return;
+        }
+
+        $this->files[$key] = $uploadedFile;
+
+        $this->resetValidation(['files.' . $key]);
+
+        $this->logChunkActivity('uploaded', $dataSourceId, [
+            'temporary_filename' => $uploadedFile->getFilename(),
+            'filesize' => $uploadedFile->getSize(),
+        ]);
+    }
+
     protected function rules(): array
     {
         $rules = [
@@ -211,34 +270,10 @@ class CreateRunModal extends Component
             $extension = strtolower((string) ($dataSource['extension'] ?? ''));
             $rules['files.' . $dataSource['id']] = [
                 'required',
-                'array',
-                function (string $attribute, $value, $fail) use ($extension) {
-                    if (! is_array($value)) {
-                        $fail(__('Adjunta un archivo válido.'));
-
-                        return;
-                    }
-
-                    $providedExtension = strtolower((string) ($value['extension'] ?? ''));
-                    $originalName = (string) ($value['original_name'] ?? '');
-
-                    if ($providedExtension === '') {
-                        $providedExtension = strtolower((string) (pathinfo($originalName, PATHINFO_EXTENSION) ?: ''));
-                    }
-
-                    if ($providedExtension === '') {
-                        $fail(__('Adjunta un archivo con una extensión válida.'));
-
-                        return;
-                    }
-
-                    $allowedExtensions = $this->allowedExtensionsFromRequirement($extension);
-
-                    if (! in_array($providedExtension, $allowedExtensions, true)) {
-                        $fail($this->extensionErrorMessage($extension));
-                    }
-                },
-            ];
+                'file',
+                'mimes:' . $this->mimesFromExtension($extension),
+                'max:512000',
+           ];
 
             $rules['files.' . $dataSource['id'] . '.path'] = ['required', 'string'];
             $rules['files.' . $dataSource['id'] . '.original_name'] = ['required', 'string'];
@@ -387,5 +422,16 @@ class CreateRunModal extends Component
             'xlsx' => __('Formato inválido. Este insumo solo acepta archivos XLSX o XLS.'),
             default => __('Formato inválido. Este insumo permite archivos CSV, XLS o XLSX.'),
         };
+    }
+
+    protected function logChunkActivity(string $event, int $dataSourceId, array $context = []): void
+    {
+        Log::info(
+            sprintf('Collection notice chunk %s', $event),
+            array_merge([
+                'component' => static::class,
+                'data_source_id' => $dataSourceId,
+            ], $context),
+        );
     }
 }
