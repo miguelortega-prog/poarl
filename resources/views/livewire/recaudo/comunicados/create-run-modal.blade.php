@@ -77,7 +77,15 @@
                                 @foreach ($dataSources as $dataSource)
                                     @php($fileKey = (string) ($dataSource['id'] ?? ''))
                                     @php($selectedFile = $fileKey !== '' ? ($files[$fileKey] ?? null) : null)
-                                    <div wire:key="data-source-{{ $dataSource['id'] }}" class="grid grid-cols-12 items-start gap-3 py-4 text-sm text-gray-700 dark:text-gray-200">
+                                    <div
+                                        wire:key="data-source-{{ $dataSource['id'] }}"
+                                        class="grid grid-cols-12 items-start gap-3 py-4 text-sm text-gray-700 dark:text-gray-200"
+                                        x-data="collectionRunUploader({
+                                            dataSourceId: {{ $dataSource['id'] }},
+                                            uploadUrl: '{{ route('recaudo.comunicados.uploads.chunk') }}',
+                                            initialFile: @js(is_array($selectedFile) ? $selectedFile : null),
+                                        })"
+                                    >
                                         <div class="col-span-12 space-y-1 text-sm tablet:col-span-6 desktop:col-span-6">
                                             <p class="font-semibold text-gray-900 dark:text-gray-100">
                                                 {{ $dataSource['name'] }} - {{ $dataSource['code'] }}
@@ -92,6 +100,7 @@
                                             <label
                                                 for="file-{{ $dataSource['id'] }}"
                                                 class="inline-flex w-full items-center justify-center gap-2 rounded-3xl border border-primary-300 bg-white px-4 py-2 text-sm font-semibold text-primary-900 shadow-sm transition hover:border-primary-500 hover:bg-primary-200/60 focus-within:ring-2 focus-within:ring-primary-500 focus-within:ring-offset-2 focus-within:ring-offset-white dark:border-gray-600 dark:bg-gray-900 dark:text-primary-200 dark:focus-within:ring-offset-gray-900 tablet:w-auto"
+                                                :class="{ 'cursor-not-allowed opacity-60': isUploading }"
                                             >
                                                 <i class="fa-solid fa-upload"></i>
                                                 <span>{{ __('Seleccionar archivo') }}</span>
@@ -99,16 +108,35 @@
                                                     id="file-{{ $dataSource['id'] }}"
                                                     name="files[{{ $dataSource['id'] }}]"
                                                     type="file"
-                                                    wire:model.live="files.{{ $dataSource['id'] }}"
+                                                    @change="handleFileSelected($event)"
+                                                    :disabled="isUploading"
                                                     class="sr-only"
                                                 />
                                             </label>
 
-                                            @if ($selectedFile)
-                                                <p class="max-w-full truncate rounded-3xl bg-gray-100 px-3 py-1 text-xs text-gray-700 dark:bg-gray-800 dark:text-gray-300">
-                                                    {{ method_exists($selectedFile, 'getClientOriginalName') ? $selectedFile->getClientOriginalName() : (string) $selectedFile }}
-                                                </p>
-                                            @endif
+                                            <div
+                                                x-show="fileName"
+                                                x-cloak
+                                                class="flex w-full items-center justify-between gap-2 rounded-3xl bg-gray-100 px-3 py-2 text-xs text-gray-700 dark:bg-gray-800 dark:text-gray-300"
+                                            >
+                                                <span class="max-w-[70%] truncate" x-text="fileName"></span>
+                                                <span class="whitespace-nowrap" x-text="progressLabel()"></span>
+                                            </div>
+
+                                            <div
+                                                x-show="isUploading"
+                                                x-cloak
+                                                class="h-2 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700"
+                                            >
+                                                <div class="h-full bg-primary-500 transition-all" :style="`width: ${progress}%`"></div>
+                                            </div>
+
+                                            <p
+                                                x-show="status === 'error' && errorMessage"
+                                                x-cloak
+                                                class="text-xs font-semibold text-danger"
+                                                x-text="errorMessage"
+                                            ></p>
 
                                             @error('files.' . $dataSource['id'])
                                                 <p class="inline-flex items-center rounded-3xl bg-danger px-3 py-1 text-xs font-semibold text-white">

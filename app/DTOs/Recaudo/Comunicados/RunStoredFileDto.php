@@ -13,7 +13,6 @@ final class RunStoredFileDto
         public readonly int $size,
         public readonly ?string $mime,
         public readonly ?string $ext,
-        public readonly ?string $sha256,
         public readonly int $uploadedBy,
     ) {}
 }

@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\CollectionNoticeChunkUploadController;
 use App\Http\Controllers\CollectionNoticeRunsController;
 use Illuminate\Support\Facades\Route;
 
@@ -23,4 +24,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
     Route::delete('/recaudo/comunicados/{run}', [CollectionNoticeRunsController::class, 'destroy'])
         ->name('recaudo.comunicados.destroy');
+
+    Route::post('/recaudo/comunicados/uploads/chunk', [CollectionNoticeChunkUploadController::class, 'store'])
+        ->name('recaudo.comunicados.uploads.chunk');
 });

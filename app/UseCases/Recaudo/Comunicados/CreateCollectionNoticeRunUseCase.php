@@ -12,6 +12,7 @@ use Illuminate\Contracts\Filesystem\Factory as FilesystemFactory;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Support\Str;
 use RuntimeException;
+use Throwable;
 
 final class CreateCollectionNoticeRunUseCase
 {
@@ -49,37 +50,69 @@ final class CreateCollectionNoticeRunUseCase
         $storedPaths = [];
         $diskName = 'collection';
         $disk = $this->filesystem->disk($diskName);
+        $tempDisk = $this->filesystem->disk('collection_temp');
 
-        return $this->db->transaction(function () use ($dto, $disk, $diskName, &$storedPaths) {
+        try {
+            return $this->db->transaction(function () use ($dto, $disk, $diskName, $tempDisk, &$storedPaths) {
             // 2.1) Crear run
             $run = $this->runRepo->create($dto);
 
             // 2.2) Guardar cada archivo
             foreach ($dto->files as $dataSourceId => $file) {
-                // Datos base
-                $originalName = $file->getClientOriginalName() ?? 'archivo';
-                $ext = pathinfo($originalName, PATHINFO_EXTENSION) ?: null;
+                if (! is_array($file)) {
+                    throw new RuntimeException('Archivo inválido recibido durante la creación del comunicado.');
+                }
+
+                $tempPath = $file['path'] ?? null;
+                if (! is_string($tempPath) || $tempPath === '' || ! $tempDisk->exists($tempPath)) {
+                    throw new RuntimeException('El archivo temporal no está disponible para su procesamiento.');
+                }
+
+                $originalName = (string) ($file['original_name'] ?? 'archivo');
+                $providedExt = (string) ($file['extension'] ?? '');
+                $ext = strtolower($providedExt ?: (pathinfo($originalName, PATHINFO_EXTENSION) ?: '')) ?: null;
                 $safeBase = Str::slug(pathinfo($originalName, PATHINFO_FILENAME));
-                $storedName = sprintf('%s_%s.%s',
+                $storedName = sprintf(
+                    '%s_%s%s',
                     $safeBase ?: 'insumo',
                     now()->format('Ymd_His'),
-                    $ext ?: 'bin'
+                    $ext ? '.' . $ext : ''
                 );
 
                 $relativeDir = sprintf('collection_notice_runs/%d/%d', $run->id, (int) $dataSourceId);
                 $relativePath = $relativeDir . '/' . $storedName;
 
-                // subir
-                $disk->putFileAs($relativeDir, $file, $storedName);
-                $storedPaths[] = [$diskName, $relativePath];
-
-                $sha256 = null;
-                $realPath = $file->getRealPath();
-                if ($realPath && is_readable($realPath)) {
-                    $sha256 = hash_file('sha256', $realPath) ?: null;
+                if (method_exists($disk, 'ensureDirectoryExists')) {
+                    $disk->ensureDirectoryExists($relativeDir);
+                } else {
+                    $disk->makeDirectory($relativeDir);
                 }
 
-                // persistir metadata
+                $readStream = $tempDisk->readStream($tempPath);
+
+                if ($readStream === false) {
+                    throw new RuntimeException('No fue posible leer el archivo temporal para su almacenamiento.');
+                }
+
+                $disk->put($relativePath, $readStream);
+
+                if (is_resource($readStream)) {
+                    fclose($readStream);
+                }
+
+                $storedPaths[] = [$diskName, $relativePath];
+
+                $tempDisk->delete($tempPath);
+                $tempDirectory = trim(dirname($tempPath), '/');
+                if ($tempDirectory !== '') {
+                    $tempDisk->deleteDirectory($tempDirectory);
+                }
+
+                $size = isset($file['size']) ? (int) $file['size'] : 0;
+                if ($size <= 0) {
+                    $size = (int) $tempDisk->size($tempPath);
+                }
+
                 $this->fileRepo->create(
                     $run->id,
                     new RunStoredFileDto(
@@ -88,10 +121,9 @@ final class CreateCollectionNoticeRunUseCase
                         storedName: $storedName,
                         disk: $diskName,
                         path: $relativePath,
-                        size: (int) $file->getSize(),
-                        mime: $file->getMimeType(),
-                        ext: $ext ? strtolower($ext) : null,
-                        sha256: $sha256,
+                        size: $size,
+                        mime: isset($file['mime']) && $file['mime'] !== '' ? (string) $file['mime'] : null,
+                        ext: $ext,
                         uploadedBy: $dto->requestedById,
                     )
                 );
@@ -102,5 +134,12 @@ final class CreateCollectionNoticeRunUseCase
 
             return ['run' => $run];
         }, 3);
+        } catch (Throwable $e) {
+            foreach ($storedPaths as [$cleanupDisk, $cleanupPath]) {
+                $this->filesystem->disk($cleanupDisk)->delete($cleanupPath);
+            }
+
+            throw $e;
+        }
     }
 }
