@@ -1,7 +1,5 @@
 import './bootstrap';
 import '../css/app.css';
-import './modules/collection-run-chunk-uploader';
-
 import collapse from '@alpinejs/collapse';
 import focus from '@alpinejs/focus';
 import { collectionRunUploader } from './modules/collection-run-chunk-uploader';

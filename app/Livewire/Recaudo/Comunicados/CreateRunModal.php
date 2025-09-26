@@ -8,15 +8,20 @@ use App\UseCases\Recaudo\Comunicados\CreateCollectionNoticeRunUseCase;
 use Carbon\Carbon;
 use Illuminate\Contracts\View\View;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Livewire\Attributes\On;
 use Livewire\Component;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 use Livewire\WithFileUploads;
+use RuntimeException;
 use Throwable;
 
 class CreateRunModal extends Component
 {
     public bool $open = false;
+
+    private const MAX_FILE_SIZE_KB = 512000;
 
     public ?int $typeId = null;
 
@@ -190,29 +195,23 @@ class CreateRunModal extends Component
     }
 
     #[On('collection-run::chunkUploading')]
-    public function handleChunkUploading(int $dataSourceId): void
+    public function handleCollectionRunChunkUploading(int $dataSourceId): void
     {
         if ($dataSourceId <= 0) {
             return;
         }
 
-        $key = (string) $dataSourceId;
-
-        unset($this->files[$key]);
-
-        $this->resetValidation(['files.' . $key]);
+        $this->resetFileSelection($dataSourceId);
 
         $this->logChunkActivity('uploading', $dataSourceId);
     }
 
     #[On('collection-run::chunkUploaded')]
-    public function handleChunkUploaded(int $dataSourceId, array $file): void
+    public function handleCollectionRunChunkUploaded(int $dataSourceId, array $file): void
     {
         if ($dataSourceId <= 0) {
             return;
         }
-
-        $key = (string) $dataSourceId;
 
         try {
             $uploadedFile = TemporaryUploadedFile::unserializeFromLivewireRequest($file);
@@ -223,7 +222,11 @@ class CreateRunModal extends Component
                 'payload_keys' => array_keys($file),
             ]);
 
-            throw $exception;
+            $this->addError('files.' . $dataSourceId, __('No fue posible procesar el archivo cargado.'));
+
+            report($exception);
+
+            return;
         }
 
         if (! $uploadedFile instanceof TemporaryUploadedFile) {
@@ -234,9 +237,22 @@ class CreateRunModal extends Component
             return;
         }
 
-        $this->files[$key] = $uploadedFile;
+        try {
+            $normalized = $this->normalizeTemporaryUpload($uploadedFile, $dataSourceId);
+        } catch (Throwable $exception) {
+            $this->logChunkActivity('uploaded_store_failed', $dataSourceId, [
+                'exception_class' => $exception::class,
+                'exception_message' => $exception->getMessage(),
+            ]);
 
-        $this->resetValidation(['files.' . $key]);
+            $this->addError('files.' . $dataSourceId, __('No fue posible almacenar temporalmente el archivo cargado.'));
+
+            report($exception);
+
+            return;
+        }
+
+        $this->storeUploadedFileMetadata($dataSourceId, $normalized);
 
         $this->logChunkActivity('uploaded', $dataSourceId, [
             'temporary_filename' => $uploadedFile->getFilename(),
@@ -270,37 +286,64 @@ class CreateRunModal extends Component
             $extension = strtolower((string) ($dataSource['extension'] ?? ''));
             $rules['files.' . $dataSource['id']] = [
                 'required',
-                'file',
-                'mimes:' . $this->mimesFromExtension($extension),
-                'max:512000',
-           ];
+                'array',
+            ];
 
-            $rules['files.' . $dataSource['id'] . '.path'] = ['required', 'string'];
+            $rules['files.' . $dataSource['id'] . '.path'] = [
+                'required',
+                'string',
+                function (string $attribute, $value, $fail) {
+                    if (! is_string($value) || str_contains($value, '..') || ! str_starts_with($value, 'completed/')) {
+                        $fail(__('La ruta del archivo es inválida.'));
+                    }
+                },
+            ];
             $rules['files.' . $dataSource['id'] . '.original_name'] = ['required', 'string'];
-            $rules['files.' . $dataSource['id'] . '.size'] = ['required', 'integer', 'min:1'];
+            $rules['files.' . $dataSource['id'] . '.size'] = [
+                'required',
+                'integer',
+                'min:1',
+                'max:' . $this->getMaxFileSizeBytes(),
+            ];
             $rules['files.' . $dataSource['id'] . '.mime'] = ['nullable', 'string'];
-            $rules['files.' . $dataSource['id'] . '.extension'] = ['nullable', 'string'];
+            $rules['files.' . $dataSource['id'] . '.extension'] = [
+                'nullable',
+                'string',
+                function (string $attribute, $value, $fail) use ($extension) {
+                    if ($value === null || $value === '') {
+                        return;
+                    }
+
+                    $value = strtolower((string) $value);
+                    $allowed = $this->allowedExtensionsFromRequirement(strtolower($extension));
+
+                    if (! in_array($value, $allowed, true)) {
+                        $fail($this->extensionErrorMessage($extension));
+                    }
+                },
+            ];
         }
 
         return $rules;
     }
 
     #[On('chunk-uploading')]
-    public function handleChunkUploading(array $payload): void
+    public function handleChunkUploading(?array $payload = null): void
     {
+        $payload ??= [];
         $dataSourceId = isset($payload['dataSourceId']) ? (int) $payload['dataSourceId'] : 0;
 
         if ($dataSourceId <= 0) {
             return;
         }
 
-        unset($this->files[(string) $dataSourceId]);
-        $this->resetErrorBag(['files.' . $dataSourceId]);
+        $this->resetFileSelection($dataSourceId);
     }
 
     #[On('chunk-uploaded')]
-    public function handleChunkUploaded(array $payload): void
+    public function handleChunkUploaded(?array $payload = null): void
     {
+        $payload ??= [];
         $dataSourceId = isset($payload['dataSourceId']) ? (int) $payload['dataSourceId'] : 0;
         $file = $payload['file'] ?? null;
 
@@ -314,15 +357,13 @@ class CreateRunModal extends Component
             return;
         }
 
-        $this->files[(string) $dataSourceId] = [
+        $this->storeUploadedFileMetadata($dataSourceId, [
             'path' => $path,
             'original_name' => (string) ($file['original_name'] ?? ''),
             'size' => isset($file['size']) ? (int) $file['size'] : 0,
             'mime' => $file['mime'] ?? null,
             'extension' => $file['extension'] ?? null,
-        ];
-
-        $this->resetErrorBag(['files.' . $dataSourceId]);
+        ]);
     }
 
     #[On('openCreateRunModal')]
@@ -350,7 +391,7 @@ class CreateRunModal extends Component
             $normalizedFiles[(int) $key] = $file;
         }
 
-        $dto = new CreateCollectionNoticeRunDto (
+        $dto = new CreateCollectionNoticeRunDto(
             collectionNoticeTypeId: (int) $this->typeId,
             periodValue: (string) ($this->periodValue ?: $this->period),
             requestedById: $userId,
@@ -424,6 +465,69 @@ class CreateRunModal extends Component
         };
     }
 
+    protected function getMaxFileSizeBytes(): int
+    {
+        return self::MAX_FILE_SIZE_KB * 1024;
+    }
+
+    /**
+     * @return array{path: string, original_name: string, size: int, mime:?string, extension:?string}
+     */
+    protected function normalizeTemporaryUpload(TemporaryUploadedFile $uploadedFile, int $dataSourceId): array
+    {
+        $originalName = $uploadedFile->getClientOriginalName() ?: $uploadedFile->getFilename();
+        $baseName = pathinfo($originalName, PATHINFO_FILENAME) ?: 'insumo';
+        $safeBase = Str::slug($baseName);
+
+        if ($safeBase === '') {
+            $safeBase = 'insumo_' . $dataSourceId;
+        }
+
+        $extension = $uploadedFile->getClientOriginalExtension();
+
+        if (! $extension) {
+            $extension = pathinfo($originalName, PATHINFO_EXTENSION) ?: null;
+        }
+
+        $extension = $extension ? strtolower((string) $extension) : null;
+
+        $directory = 'completed/' . (string) Str::uuid();
+        $storedName = $safeBase . ($extension ? '.' . $extension : '');
+
+        $relativePath = $uploadedFile->storeAs($directory, $storedName, 'collection_temp');
+
+        if (! is_string($relativePath) || $relativePath === '') {
+            throw new RuntimeException('No fue posible guardar temporalmente el archivo recibido.');
+        }
+
+        $size = (int) $uploadedFile->getSize();
+
+        if ($size <= 0) {
+            $size = (int) Storage::disk('collection_temp')->size($relativePath);
+        }
+
+        if ($size > $this->getMaxFileSizeBytes()) {
+            throw new RuntimeException('El archivo excede el tamaño máximo permitido.');
+        }
+
+        return [
+            'path' => $relativePath,
+            'original_name' => $originalName,
+            'size' => $size,
+            'mime' => $uploadedFile->getMimeType() ?: null,
+            'extension' => $extension,
+        ];
+    }
+
+    protected function resetFileSelection(int $dataSourceId): void
+    {
+        $key = (string) $dataSourceId;
+
+        unset($this->files[$key]);
+
+        $this->resetValidation(['files.' . $key]);
+    }
+
     protected function logChunkActivity(string $event, int $dataSourceId, array $context = []): void
     {
         Log::info(
@@ -433,5 +537,15 @@ class CreateRunModal extends Component
                 'data_source_id' => $dataSourceId,
             ], $context),
         );
+    }
+
+    /**
+     * @param array{path: string, original_name: string, size: int, mime: string|null, extension: string|null} file
+     */
+    private function storeUploadedFileMetadata(int $dataSourceId, array $file): void
+    {
+        $this->files[(string) $dataSourceId] = $file;
+
+        $this->resetValidation(['files.' . $dataSourceId]);
     }
 }
