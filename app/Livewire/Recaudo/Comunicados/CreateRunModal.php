@@ -16,8 +16,6 @@ use Throwable;
 
 class CreateRunModal extends Component
 {
-    use WithFileUploads;
-
     public bool $open = false;
 
     public ?int $typeId = null;
@@ -53,23 +51,15 @@ class CreateRunModal extends Component
             'period.required' => 'Debes ingresar el periodo en formato YYYYMM.',
             'period.regex' => 'El periodo debe tener formato YYYYMM.',
             'files.*.required' => 'Debes adjuntar el archivo correspondiente a este insumo.',
-            //'files.*.file' => 'Adjunta un archivo válido.',
-            //'files.*.max' => 'El archivo supera el tamaño máximo permitido (500 MB).',
+            'files.*.array' => 'Adjunta un archivo válido.',
+            'files.*.path.required' => 'La carga del archivo aún no finaliza.',
+            'files.*.path.string' => 'La ruta temporal del archivo es inválida.',
+            'files.*.original_name.required' => 'No se recibió el nombre del archivo cargado.',
+            'files.*.original_name.string' => 'El nombre del archivo es inválido.',
+            'files.*.size.required' => 'No se detectó el tamaño del archivo cargado.',
+            'files.*.size.integer' => 'El tamaño del archivo es inválido.',
+            'files.*.size.min' => 'El archivo debe contener información.',
         ];
-
-        foreach ($this->dataSources as $dataSource) {
-            if (! isset($dataSource['id'])) {
-                continue;
-            }
-
-            $extension = strtolower((string) ($dataSource['extension'] ?? ''));
-            $messages['files.' . $dataSource['id'] . '.mimes'] = match ($extension) {
-                'csv' => 'Formato inválido. Este insumo solo acepta archivos CSV o TXT.',
-                'xls' => 'Formato inválido. Este insumo solo acepta archivos XLS.',
-                'xlsx' => 'Formato inválido. Este insumo solo acepta archivos XLSX o XLS.',
-                default => 'Formato inválido. Este insumo permite archivos CSV, XLS o XLSX.',
-            };
-        }
 
         return $messages;
     }
@@ -163,7 +153,7 @@ class CreateRunModal extends Component
 
             $file = $this->files[$key] ?? null;
 
-            if ($key === '' || ! $file instanceof TemporaryUploadedFile) {
+            if ($key === '' || ! is_array($file) || empty($file['path'])) {
                 return false;
             }
         }
@@ -283,10 +273,56 @@ class CreateRunModal extends Component
                 'file',
                 'mimes:' . $this->mimesFromExtension($extension),
                 'max:512000',
-            ];
+           ];
+
+            $rules['files.' . $dataSource['id'] . '.path'] = ['required', 'string'];
+            $rules['files.' . $dataSource['id'] . '.original_name'] = ['required', 'string'];
+            $rules['files.' . $dataSource['id'] . '.size'] = ['required', 'integer', 'min:1'];
+            $rules['files.' . $dataSource['id'] . '.mime'] = ['nullable', 'string'];
+            $rules['files.' . $dataSource['id'] . '.extension'] = ['nullable', 'string'];
         }
 
         return $rules;
+    }
+
+    #[On('chunk-uploading')]
+    public function handleChunkUploading(array $payload): void
+    {
+        $dataSourceId = isset($payload['dataSourceId']) ? (int) $payload['dataSourceId'] : 0;
+
+        if ($dataSourceId <= 0) {
+            return;
+        }
+
+        unset($this->files[(string) $dataSourceId]);
+        $this->resetErrorBag(['files.' . $dataSourceId]);
+    }
+
+    #[On('chunk-uploaded')]
+    public function handleChunkUploaded(array $payload): void
+    {
+        $dataSourceId = isset($payload['dataSourceId']) ? (int) $payload['dataSourceId'] : 0;
+        $file = $payload['file'] ?? null;
+
+        if ($dataSourceId <= 0 || ! is_array($file)) {
+            return;
+        }
+
+        $path = (string) ($file['path'] ?? '');
+
+        if ($path === '') {
+            return;
+        }
+
+        $this->files[(string) $dataSourceId] = [
+            'path' => $path,
+            'original_name' => (string) ($file['original_name'] ?? ''),
+            'size' => isset($file['size']) ? (int) $file['size'] : 0,
+            'mime' => $file['mime'] ?? null,
+            'extension' => $file['extension'] ?? null,
+        ];
+
+        $this->resetErrorBag(['files.' . $dataSourceId]);
     }
 
     #[On('openCreateRunModal')]
@@ -368,13 +404,23 @@ class CreateRunModal extends Component
         return $year >= 2000 && $month >= 1 && $month <= 12;
     }
 
-    protected function mimesFromExtension(string $extension): string
+    protected function allowedExtensionsFromRequirement(string $extension): array
     {
         return match ($extension) {
-            'csv' => 'csv,txt',
-            'xls' => 'xls',
-            'xlsx' => 'xlsx,xls',
-            default => 'csv,xls,xlsx',
+            'csv' => ['csv', 'txt'],
+            'xls' => ['xls'],
+            'xlsx' => ['xlsx', 'xls'],
+            default => ['csv', 'xls', 'xlsx'],
+        };
+    }
+
+    protected function extensionErrorMessage(string $extension): string
+    {
+        return match ($extension) {
+            'csv' => __('Formato inválido. Este insumo solo acepta archivos CSV o TXT.'),
+            'xls' => __('Formato inválido. Este insumo solo acepta archivos XLS.'),
+            'xlsx' => __('Formato inválido. Este insumo solo acepta archivos XLSX o XLS.'),
+            default => __('Formato inválido. Este insumo permite archivos CSV, XLS o XLSX.'),
         };
     }
 

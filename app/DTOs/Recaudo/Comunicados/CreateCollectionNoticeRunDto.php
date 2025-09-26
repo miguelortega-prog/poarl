@@ -2,13 +2,11 @@
 
 namespace App\DTOs\Recaudo\Comunicados;
 
-use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
-
-/**
- * @param array<int, TemporaryUploadedFile> $files  // key: notice_data_source_id
- */
 final class CreateCollectionNoticeRunDto
 {
+    /**
+     * @param array<int, array{path:string, original_name:string, size:int, mime:?string, extension:?string}> $files
+     */
     public function __construct(
         public readonly int $collectionNoticeTypeId,
         public readonly string $periodValue,

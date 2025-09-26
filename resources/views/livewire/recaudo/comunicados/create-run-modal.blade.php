@@ -77,7 +77,15 @@
                                 @foreach ($dataSources as $dataSource)
                                     @php($fileKey = (string) ($dataSource['id'] ?? ''))
                                     @php($selectedFile = $fileKey !== '' ? ($files[$fileKey] ?? null) : null)
-                                    <div wire:key="data-source-{{ $dataSource['id'] }}" class="grid grid-cols-12 items-start gap-3 py-4 text-sm text-gray-700 dark:text-gray-200">
+                                    <div
+                                        wire:key="data-source-{{ $dataSource['id'] }}"
+                                        class="grid grid-cols-12 items-start gap-3 py-4 text-sm text-gray-700 dark:text-gray-200"
+                                        x-data="collectionRunUploader({
+                                            dataSourceId: {{ $dataSource['id'] }},
+                                            uploadUrl: '{{ route('recaudo.comunicados.uploads.chunk') }}',
+                                            initialFile: @js(is_array($selectedFile) ? $selectedFile : null),
+                                        })"
+                                    >
                                         <div class="col-span-12 space-y-1 text-sm tablet:col-span-6 desktop:col-span-6">
                                             <p class="font-semibold text-gray-900 dark:text-gray-100">
                                                 {{ $dataSource['name'] }} - {{ $dataSource['code'] }}
@@ -130,6 +138,7 @@
                                             <label
                                                 for="file-{{ $dataSource['id'] }}"
                                                 class="inline-flex w-full items-center justify-center gap-2 rounded-3xl border border-primary-300 bg-white px-4 py-2 text-sm font-semibold text-primary-900 shadow-sm transition hover:border-primary-500 hover:bg-primary-200/60 focus-within:ring-2 focus-within:ring-primary-500 focus-within:ring-offset-2 focus-within:ring-offset-white dark:border-gray-600 dark:bg-gray-900 dark:text-primary-200 dark:focus-within:ring-offset-gray-900 tablet:w-auto"
+                                                :class="{ 'cursor-not-allowed opacity-60': isUploading }"
                                             >
                                                 <i class="fa-solid fa-upload"></i>
                                                 <span>{{ __('Seleccionar archivo') }}</span>

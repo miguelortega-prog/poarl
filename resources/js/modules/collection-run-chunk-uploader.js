@@ -7,3 +7,4 @@ document.addEventListener('livewire:init', () => {
         Livewire.setUploadChunkSize(CHUNK_SIZE_BYTES);
     }
 });
+
