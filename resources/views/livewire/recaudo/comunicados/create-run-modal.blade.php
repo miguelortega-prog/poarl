@@ -165,8 +165,20 @@
                                             </div>
 
                                             @if ($selectedFile)
+                                                @php
+                                                    $displayName = null;
+
+                                                    if (is_array($selectedFile)) {
+                                                        $displayName = $selectedFile['original_name'] ?? null;
+                                                    } elseif (method_exists($selectedFile, 'getClientOriginalName')) {
+                                                        $displayName = $selectedFile->getClientOriginalName();
+                                                    } else {
+                                                        $displayName = (string) $selectedFile;
+                                                    }
+                                                @endphp
+
                                                 <p class="max-w-full truncate rounded-3xl bg-gray-100 px-3 py-1 text-xs text-gray-700 dark:bg-gray-800 dark:text-gray-300">
-                                                    {{ method_exists($selectedFile, 'getClientOriginalName') ? $selectedFile->getClientOriginalName() : (string) $selectedFile }}
+                                                    {{ $displayName ?: __('Archivo seleccionado') }}
                                                 </p>
                                             @endif
 
