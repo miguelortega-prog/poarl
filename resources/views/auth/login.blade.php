@@ -39,9 +39,12 @@
                     </a>
                 @endif
 
-                <x-button class="ms-4">
+                <button
+                    type="submit"
+                    class="ms-4 inline-flex items-center justify-center px-6 py-2.5 rounded-3xl bg-secondary-900 text-primary font-semibold uppercase tracking-widest transition-colors duration-200 hover:bg-secondary-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-secondary-600"
+                >
                     {{ __('Log in') }}
-                </x-button>
+                </button>
             </div>
         </form>
 
@@ -50,10 +53,10 @@
             <p class="text-sm text-gray-600 dark:text-gray-400">
                 {{ __("No estás registrado?") }}
                 <a href="{{ route('register') }}"
-                   class="font-semibold text-indigo-600 hover:text-indigo-900 dark:text-indigo-400 dark:hover:text-indigo-200">
+                   class="font-semibold text-primary hover:text-primary-700 dark:text-primary dark:hover:text-primary-300">
                     {{ __('Regístrate aquí') }}
                 </a>
             </p>
-        </div>        
+        </div>
     </x-authentication-card>
 </x-guest-layout>
