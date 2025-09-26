@@ -273,6 +273,7 @@ class CreateRunModal extends Component
             // UX: cerrar, limpiar y notificar
             $this->dispatch('toast', type: 'success', message: __('Trabajo generado correctamente.'));
             $this->cancel();
+            $this->dispatch('collectionNoticeRunCreated');
         } catch (\Throwable $e) {
             report($e);
             $this->addError('general', __('No fue posible crear el trabajo. Intenta de nuevo.'));

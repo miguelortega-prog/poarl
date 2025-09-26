@@ -282,4 +282,12 @@
     </div>
 
     @livewire('recaudo.comunicados.create-run-modal')
+
+    <script>
+        document.addEventListener('livewire:init', () => {
+            Livewire.on('collectionNoticeRunCreated', () => {
+                window.location.reload();
+            });
+        });
+    </script>
 </x-app-layout>
