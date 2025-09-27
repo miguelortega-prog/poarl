@@ -97,6 +97,7 @@
                                                 x-data="collectionRunUploader({
                                                     dataSourceId: {{ $dataSource['id'] }},
                                                     uploadUrl: '{{ route('recaudo.comunicados.uploads.chunk') }}',
+                                                    chunkSize: @js((int) config('chunked-uploads.collection_notices.chunk_size')),
                                                     initialFile: @js(is_array($selectedFile) ? $selectedFile : null),
                                                 })"
                                                 x-init="(() => { init(); $el.addEventListener('alpine:destroy', () => destroy(), { once: true }); })()"
