@@ -81,20 +81,24 @@
                                 @foreach ($dataSources as $dataSource)
                                     @php($fileKey = (string) ($dataSource['id'] ?? ''))
                                     @php($selectedFile = $fileKey !== '' ? ($files[$fileKey] ?? null) : null)
+                                    @php($dataSourceDto = \App\DTOs\Recaudo\Comunicados\DataSourceUploadDto::fromArray($dataSource))
+                                    @php($errorKey = $dataSourceDto->id > 0 ? 'files.' . $dataSourceDto->id : null)
 
                                     <x-recaudo.comunicados.data-source-uploader
-                                        :wire:key="'data-source-' . ($dataSource['id'] ?? 'unknown')"
-                                        :data-source="\App\\DTOs\\Recaudo\\Comunicados\\DataSourceUploadDto::fromArray($dataSource)"
+                                        :wire:key="'data-source-' . ($dataSourceDto->id ?: 'unknown')"
+                                        :data-source="$dataSourceDto"
                                         :selected-file="is_array($selectedFile) ? $selectedFile : null"
                                         :upload-url="route('recaudo.comunicados.uploads.chunk')"
                                         :chunk-size="(int) config('chunked-uploads.collection_notices.chunk_size')"
                                         :max-file-size="$this->maxFileSizeBytes"
                                     >
-                                        @error('files.' . $dataSource['id'])
-                                            <p class="inline-flex items-center rounded-3xl bg-danger px-3 py-1 text-xs font-semibold text-white">
-                                                {{ $message }}
-                                            </p>
-                                        @enderror
+                                        @if ($errorKey)
+                                            @error($errorKey)
+                                                <p class="inline-flex items-center rounded-3xl bg-danger px-3 py-1 text-xs font-semibold text-white">
+                                                    {{ $message }}
+                                                </p>
+                                            @enderror
+                                        @endif
                                     </x-recaudo.comunicados.data-source-uploader>
                                 @endforeach
                             </div>
