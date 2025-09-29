@@ -70,6 +70,8 @@
                             {{ __('Cada archivo puede pesar máximo :size.', ['size' => $this->maxFileSizeLabel]) }}
                         </p>
 
+                        @php($chunkUploadUrl = route('recaudo.comunicados.uploads.chunk', absolute: false))
+
                         <div class="rounded-3xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-900/40">
                             <div class="grid grid-cols-12 gap-3 border-b border-gray-200 bg-gray-100 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300">
                                 <div class="col-span-12 tablet:col-span-6 desktop:col-span-6">{{ __('Nombre – Código') }}</div>
@@ -88,7 +90,7 @@
                                         :wire:key="'data-source-' . ($dataSourceDto->id ?: 'unknown')"
                                         :data-source="$dataSourceDto"
                                         :selected-file="is_array($selectedFile) ? $selectedFile : null"
-                                        :upload-url="route('recaudo.comunicados.uploads.chunk')"
+                                        :upload-url="$chunkUploadUrl"
                                         :chunk-size="(int) config('chunked-uploads.collection_notices.chunk_size')"
                                         :max-file-size="$this->maxFileSizeBytes"
                                     >

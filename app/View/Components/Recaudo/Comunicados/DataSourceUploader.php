@@ -43,7 +43,7 @@ class DataSourceUploader extends Component
     ) {
         $this->dataSource = $dataSource;
         $this->selectedFile = $this->sanitizeSelectedFile($selectedFile);
-        $this->uploadUrl = $uploadUrl;
+        $this->uploadUrl = $this->normalizeUploadUrl($uploadUrl);
         $this->chunkSize = $chunkSize;
         $this->maxFileSize = $maxFileSize;
         $this->inputId = 'file-' . $this->dataSource->id;
@@ -147,5 +147,33 @@ class DataSourceUploader extends Component
             'txt' => ['txt', 'csv'],
             default => self::DEFAULT_ACCEPTED_EXTENSIONS,
         };
+    }
+
+    /**
+     * Normaliza la URL del endpoint de carga para garantizar que utilice la misma
+     * raíz del dominio que la aplicación y evitar conflictos de CORS.
+     */
+    private function normalizeUploadUrl(string $uploadUrl): string
+    {
+        if ($uploadUrl === '' || str_starts_with($uploadUrl, '/')) {
+            return $uploadUrl;
+        }
+
+        $components = parse_url($uploadUrl);
+
+        if ($components === false) {
+            return $uploadUrl;
+        }
+
+        $path = $components['path'] ?? '';
+        $query = isset($components['query']) ? '?' . $components['query'] : '';
+
+        if ($path === '') {
+            return $uploadUrl;
+        }
+
+        $normalizedPath = str_starts_with($path, '/') ? $path : '/' . ltrim($path, '/');
+
+        return $normalizedPath . $query;
     }
 }
