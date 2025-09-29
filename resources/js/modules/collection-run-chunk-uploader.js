@@ -117,7 +117,7 @@ class ChunkedUploadSession {
         try {
             const response = await this.httpClient.post(this.uploadUrl, formData, {
                 signal: controller.signal,
-                withCredentials: true,
+                withCredentials: shouldSendCredentials(this.uploadUrl),
                 headers: this.csrfToken
                     ? { 'X-CSRF-TOKEN': this.csrfToken }
                     : undefined,
@@ -152,6 +152,19 @@ class ChunkedUploadSession {
                 this.currentController = null;
             }
         }
+    }
+}
+
+function shouldSendCredentials(uploadUrl) {
+    if (typeof window === 'undefined' || typeof uploadUrl !== 'string' || uploadUrl.trim() === '') {
+        return true;
+    }
+
+    try {
+        const normalizedUrl = new URL(uploadUrl, window.location.origin);
+        return normalizedUrl.origin === window.location.origin;
+    } catch (error) {
+        return true;
     }
 }
 
