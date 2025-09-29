@@ -1,13 +1,16 @@
 import axios from 'axios';
 
-const FIVE_MEGABYTES = 5 * 1024 * 1024;
-const DEFAULT_CHUNK_SIZE = FIVE_MEGABYTES;
+const ONE_MEGABYTE = 1024 * 1024;
+const MAX_CHUNK_SIZE = 5 * ONE_MEGABYTE;
+const DEFAULT_CHUNK_SIZE = 2 * ONE_MEGABYTE;
+const MIN_CHUNK_SIZE = 256 * 1024;
 
-let livewireChunkSizeConfigured = false;
+let desiredLivewireChunkSize = DEFAULT_CHUNK_SIZE;
+let configuredLivewireChunkSize = null;
 
 if (typeof document !== 'undefined') {
     document.addEventListener('livewire:init', () => {
-        configureLivewireChunkSize();
+        attemptConfigureLivewireChunkSize();
     });
 }
 
@@ -171,7 +174,7 @@ export function collectionRunUploader(options) {
         currentSession: null,
 
         init() {
-            configureLivewireChunkSize();
+            configureLivewireChunkSize(this.chunkSize);
 
             if (this.fileData) {
                 this.applyUploadedFile(this.fileData);
@@ -205,8 +208,8 @@ export function collectionRunUploader(options) {
             this.isUploading = true;
             this.uploadId = generateUploadId();
 
-            this.dispatchLivewireEvent('collection-run::chunkUploading', { dataSourceId: this.dataSourceId });
-            this.dispatchLivewireEvent('chunk-uploading', { dataSourceId: this.dataSourceId });
+            //this.dispatchLivewireEvent('collection-run::chunkUploading', { dataSourceId: this.dataSourceId });
+            //this.dispatchLivewireEvent('chunk-uploading', { dataSourceId: this.dataSourceId });
 
             try {
                 const session = new ChunkedUploadSession({
@@ -302,8 +305,7 @@ export function collectionRunUploader(options) {
             }
 
             const normalized = clamp(value, 0, 100);
-            console.log('Progress update:', normalized);
-            this.progress = normalized;
+            this.progress = Math.max(this.progress, normalized);
         },
 
         cancelOngoingUpload() {
@@ -477,20 +479,35 @@ function resolveChunkSize(value) {
         return DEFAULT_CHUNK_SIZE;
     }
 
-    return Math.max(Math.min(numericValue, DEFAULT_CHUNK_SIZE), DEFAULT_CHUNK_SIZE);
+    return clamp(numericValue, MIN_CHUNK_SIZE, MAX_CHUNK_SIZE);
 }
 
-function configureLivewireChunkSize() {
-    if (livewireChunkSizeConfigured || typeof window === 'undefined') {
+function configureLivewireChunkSize(preferredSize = DEFAULT_CHUNK_SIZE) {
+    const normalized = resolveChunkSize(preferredSize);
+
+    if (desiredLivewireChunkSize === normalized) {
+        attemptConfigureLivewireChunkSize();
+
+        return;
+    }
+
+    desiredLivewireChunkSize = normalized;
+    attemptConfigureLivewireChunkSize();
+}
+
+function attemptConfigureLivewireChunkSize() {
+    if (typeof window === 'undefined' || configuredLivewireChunkSize === desiredLivewireChunkSize) {
         return;
     }
 
     const { Livewire } = window;
 
-    if (Livewire && typeof Livewire.setUploadChunkSize === 'function') {
-        Livewire.setUploadChunkSize(DEFAULT_CHUNK_SIZE);
-        livewireChunkSizeConfigured = true;
+    if (!Livewire || typeof Livewire.setUploadChunkSize !== 'function') {
+        return;
     }
+
+    Livewire.setUploadChunkSize(desiredLivewireChunkSize);
+    configuredLivewireChunkSize = desiredLivewireChunkSize;
 }
 
 function generateUploadId() {
