@@ -21,7 +21,7 @@ final class CollectionRunChunkManager
             return;
         }
 
-        $form->resetUploadedFile($dataSourceId);
+        $form->markFileUploadInProgress($dataSourceId);
         $form->logChunkEvent('uploading', $dataSourceId, $this->buildPayloadContext($payload));
         $form->preventRender();
     }
@@ -31,6 +31,10 @@ final class CollectionRunChunkManager
         ['dataSourceId' => $dataSourceId, 'file' => $file] = $this->resolveUploadEventArguments(...$arguments);
 
         if ($dataSourceId <= 0 || ! is_array($file)) {
+            if ($dataSourceId > 0) {
+                $form->clearFileUploadState($dataSourceId);
+            }
+
             $form->preventRender();
 
             return;
@@ -46,6 +50,10 @@ final class CollectionRunChunkManager
         $file = isset($payload['file']) && is_array($payload['file']) ? $payload['file'] : null;
 
         if ($dataSourceId <= 0 || $file === null) {
+            if ($dataSourceId > 0) {
+                $form->clearFileUploadState($dataSourceId);
+            }
+
             return;
         }
 
@@ -119,6 +127,7 @@ final class CollectionRunChunkManager
                 'payload_keys' => array_keys($file),
             ]);
 
+            $form->clearFileUploadState($dataSourceId);
             $form->preventRender();
 
             return;
@@ -129,6 +138,7 @@ final class CollectionRunChunkManager
                 'payload_keys' => array_keys($file),
             ]);
 
+            $form->clearFileUploadState($dataSourceId);
             $form->preventRender();
 
             return;
@@ -152,6 +162,7 @@ final class CollectionRunChunkManager
                 __('No fue posible almacenar temporalmente el archivo cargado.'),
             );
 
+            $form->clearFileUploadState($dataSourceId);
             $form->preventRender();
 
             return;
@@ -179,6 +190,7 @@ final class CollectionRunChunkManager
         ]));
 
         $form->registerFileError($dataSourceId, $message ?? __('No fue posible procesar el archivo cargado.'));
+        $form->clearFileUploadState($dataSourceId);
 
         report($exception);
     }

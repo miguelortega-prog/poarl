@@ -48,6 +48,16 @@ class CreateRunModal extends Component implements CollectionRunFormContext
      */
     public array $files = [];
 
+    /**
+     * @var array<string, bool>
+     */
+    public array $uploadingSources = [];
+
+    /**
+     * @var array<string, bool>
+     */
+    public array $staleUploads = [];
+
     public bool $formReady = false;
 
     private CollectionRunChunkManager $chunkManager;
@@ -106,6 +116,8 @@ class CreateRunModal extends Component implements CollectionRunFormContext
         $this->resetValidation(['typeId', 'period', 'files']);
 
         $this->files = [];
+        $this->uploadingSources = [];
+        $this->staleUploads = [];
         $this->dataSources = [];
         $this->periodMode = null;
         $this->period = '';
@@ -189,8 +201,16 @@ class CreateRunModal extends Component implements CollectionRunFormContext
             $key = (string) ($dataSource['id'] ?? '');
 
             $file = $this->files[$key] ?? null;
+            $isUploading = (bool) ($this->uploadingSources[$key] ?? false);
+            $isStale = (bool) ($this->staleUploads[$key] ?? false);
 
-            if ($key === '' || ! is_array($file) || empty($file['path'])) {
+            if (
+                $key === ''
+                || ! is_array($file)
+                || empty($file['path'])
+                || $isUploading
+                || $isStale
+            ) {
                 return false;
             }
         }
@@ -201,7 +221,17 @@ class CreateRunModal extends Component implements CollectionRunFormContext
     public function updatedOpen(bool $value): void
     {
         if (! $value) {
-            $this->reset(['typeId', 'dataSources', 'files', 'periodMode', 'period', 'periodReadonly', 'periodValue']);
+            $this->reset([
+                'typeId',
+                'dataSources',
+                'files',
+                'uploadingSources',
+                'staleUploads',
+                'periodMode',
+                'period',
+                'periodReadonly',
+                'periodValue',
+            ]);
             $this->resetValidation();
             $this->broadcastFormState();
         }
@@ -358,7 +388,17 @@ class CreateRunModal extends Component implements CollectionRunFormContext
     #[On('openCreateRunModal')]
     public function handleOpenCreateRunModal(): void
     {
-        $this->reset(['typeId', 'dataSources', 'files', 'periodMode', 'period', 'periodReadonly', 'periodValue']);
+        $this->reset([
+            'typeId',
+            'dataSources',
+            'files',
+            'uploadingSources',
+            'staleUploads',
+            'periodMode',
+            'period',
+            'periodReadonly',
+            'periodValue',
+        ]);
         $this->resetValidation();
         $this->open = true;
         $this->broadcastFormState();
@@ -366,7 +406,18 @@ class CreateRunModal extends Component implements CollectionRunFormContext
 
     public function cancel(): void
     {
-        $this->reset(['open', 'typeId', 'dataSources', 'files', 'periodMode', 'period', 'periodReadonly', 'periodValue']);
+        $this->reset([
+            'open',
+            'typeId',
+            'dataSources',
+            'files',
+            'uploadingSources',
+            'staleUploads',
+            'periodMode',
+            'period',
+            'periodReadonly',
+            'periodValue',
+        ]);
         $this->resetValidation();
         $this->broadcastFormState();
     }
@@ -405,6 +456,10 @@ class CreateRunModal extends Component implements CollectionRunFormContext
 
         foreach ($this->files as $key => $file) {
             if (! is_array($file)) {
+                continue;
+            }
+
+            if (($this->uploadingSources[$key] ?? false) || ($this->staleUploads[$key] ?? false)) {
                 continue;
             }
 
@@ -466,6 +521,7 @@ class CreateRunModal extends Component implements CollectionRunFormContext
         $key = (string) $dataSourceId;
 
         unset($this->files[$key]);
+        unset($this->uploadingSources[$key], $this->staleUploads[$key]);
 
         $this->resetValidation(['files.' . $key]);
 
@@ -498,7 +554,10 @@ class CreateRunModal extends Component implements CollectionRunFormContext
 
     public function persistUploadedFile(int $dataSourceId, CollectionRunUploadedFileDto $file): void
     {
-        $this->files[(string) $dataSourceId] = $file->toArray();
+        $key = (string) $dataSourceId;
+
+        $this->files[$key] = $file->toArray();
+        unset($this->uploadingSources[$key], $this->staleUploads[$key]);
 
         $this->resetValidation(['files.' . $dataSourceId]);
 
@@ -508,6 +567,28 @@ class CreateRunModal extends Component implements CollectionRunFormContext
     public function registerFileError(int $dataSourceId, string $message): void
     {
         $this->addError('files.' . $dataSourceId, $message);
+        unset($this->uploadingSources[(string) $dataSourceId], $this->staleUploads[(string) $dataSourceId]);
+
+        $this->broadcastFormState();
+    }
+
+    public function markFileUploadInProgress(int $dataSourceId): void
+    {
+        $key = (string) $dataSourceId;
+
+        $this->uploadingSources[$key] = true;
+        $this->staleUploads[$key] = true;
+
+        $this->resetValidation(['files.' . $key]);
+
+        $this->broadcastFormState();
+    }
+
+    public function clearFileUploadState(int $dataSourceId): void
+    {
+        $key = (string) $dataSourceId;
+
+        unset($this->uploadingSources[$key], $this->staleUploads[$key]);
 
         $this->broadcastFormState();
     }

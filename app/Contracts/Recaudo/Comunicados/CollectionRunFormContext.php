@@ -23,5 +23,9 @@ interface CollectionRunFormContext
 
     public function broadcastFormState(): void;
 
+    public function markFileUploadInProgress(int $dataSourceId): void;
+
+    public function clearFileUploadState(int $dataSourceId): void;
+
     public function preventRender(): void;
 }

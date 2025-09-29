@@ -80,7 +80,8 @@
                             <div class="max-h-80 overflow-y-auto divide-y divide-gray-200 px-4 dark:divide-gray-700">
                                 @foreach ($dataSources as $dataSource)
                                     @php($fileKey = (string) ($dataSource['id'] ?? ''))
-                                    @php($selectedFile = $fileKey !== '' ? ($files[$fileKey] ?? null) : null)
+                                    @php($isStale = $fileKey !== '' ? ($staleUploads[$fileKey] ?? false) : false)
+                                    @php($selectedFile = $fileKey !== '' && ! $isStale ? ($files[$fileKey] ?? null) : null)
                                     <div
                                         wire:key="data-source-{{ $dataSource['id'] }}"
                                         class="grid grid-cols-12 items-start gap-3 py-4 text-sm text-gray-700 dark:text-gray-200"
