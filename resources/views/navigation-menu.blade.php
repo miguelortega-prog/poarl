@@ -15,7 +15,7 @@
                 </button>
 
                 <a href="{{ route('dashboard') }}" class="flex items-center gap-2 text-gray-900 dark:text-gray-100">
-                    <x-application-mark class="block h-9 w-auto" />
+                    <x-application-mark class="block h-24 w-auto" />
                     <span class="hidden text-lg font-semibold sm:inline">{{ config('app.name', 'Laravel') }}</span>
                 </a>
             </div>
