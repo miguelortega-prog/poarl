@@ -1,5 +1,45 @@
 <?php
 
+use function array_filter;
+use function array_map;
+use function array_unique;
+use function array_values;
+use function explode;
+use function in_array;
+use function is_string;
+use function rtrim;
+use function trim;
+
+$configuredOrigins = array_values(array_filter(array_unique(array_map(
+    static fn (string $origin): string => rtrim(trim($origin), '/'),
+    explode(',', (string) env('CORS_ALLOWED_ORIGINS', '')),
+))));
+
+if (empty($configuredOrigins)) {
+    $defaultOrigins = [
+        env('APP_URL', 'http://localhost'),
+        env('FRONTEND_URL', ''),
+        'http://localhost',
+        'http://127.0.0.1',
+    ];
+
+    foreach ($defaultOrigins as $origin) {
+        if (! is_string($origin) || $origin === '') {
+            continue;
+        }
+
+        $trimmed = rtrim($origin, '/');
+
+        if ($trimmed === '') {
+            continue;
+        }
+
+        if (! in_array($trimmed, $configuredOrigins, true)) {
+            $configuredOrigins[] = $trimmed;
+        }
+    }
+}
+
 return [
 
     /*
@@ -23,7 +63,7 @@ return [
 
     'allowed_methods' => ['*'],
 
-    'allowed_origins' => ['*'],
+    'allowed_origins' => $configuredOrigins,
 
     'allowed_origins_patterns' => [],
 
@@ -33,6 +73,6 @@ return [
 
     'max_age' => 0,
 
-    'supports_credentials' => false,
+    'supports_credentials' => true,
 
 ];

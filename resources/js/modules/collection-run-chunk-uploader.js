@@ -117,7 +117,7 @@ class ChunkedUploadSession {
         try {
             const response = await this.httpClient.post(this.uploadUrl, formData, {
                 signal: controller.signal,
-                withCredentials: shouldSendCredentials(this.uploadUrl),
+                withCredentials: shouldSendCredentials(),
                 headers: this.csrfToken
                     ? { 'X-CSRF-TOKEN': this.csrfToken }
                     : undefined,
@@ -155,17 +155,18 @@ class ChunkedUploadSession {
     }
 }
 
-function shouldSendCredentials(uploadUrl) {
-    if (typeof window === 'undefined' || typeof uploadUrl !== 'string' || uploadUrl.trim() === '') {
+function shouldSendCredentials() {
+    if (typeof window === 'undefined') {
         return true;
     }
 
-    try {
-        const normalizedUrl = new URL(uploadUrl, window.location.origin);
-        return normalizedUrl.origin === window.location.origin;
-    } catch (error) {
-        return true;
+    const globalOverride = window.POARL_CHUNK_UPLOADS_WITH_CREDENTIALS;
+
+    if (typeof globalOverride === 'boolean') {
+        return globalOverride;
     }
+
+    return true;
 }
 
 export function collectionRunUploader(options) {
