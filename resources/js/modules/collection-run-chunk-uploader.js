@@ -473,13 +473,10 @@ export function collectionRunUploader(options) {
             this.wireWatcherStop = this.$watch(
                 () => {
                     try {
-                        return {
-                            file: this.$wire.get(`files.${this.dataSourceId}`),
-                            stale: Boolean(this.$wire.get(`staleUploads.${this.dataSourceId}`)),
-                        };
+                        return this.$wire.get(`files.${this.dataSourceId}`);
                     } catch (error) {
                         console.error('No fue posible leer el archivo desde Livewire.', error);
-                        return { file: null, stale: false };
+                        return null;
                     }
                 },
                 (value) => {
@@ -487,16 +484,7 @@ export function collectionRunUploader(options) {
                         return;
                     }
 
-                    const isStale = Boolean(value?.stale);
-                    const normalized = normalizeUploadedFile(value?.file ?? null);
-
-                    if (isStale) {
-                        if (this.status === 'completed') {
-                            this.clearUploadedFile();
-                        }
-
-                        return;
-                    }
+                    const normalized = normalizeUploadedFile(value);
 
                     if (normalized) {
                         this.applyUploadedFile(normalized);
