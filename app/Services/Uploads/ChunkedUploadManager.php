@@ -259,6 +259,16 @@ class ChunkedUploadManager
         }
     }
 
+    public function discardUpload(string $uploadId): void
+    {
+        $this->assertValidUploadId($uploadId);
+
+        $disk = $this->getDisk();
+
+        $disk->deleteDirectory($this->buildPendingPath($uploadId));
+        $disk->deleteDirectory($this->buildCompletedPath($uploadId));
+    }
+
     private function detectMimeType(string $absolutePath): ?string
     {
         if (! is_file($absolutePath)) {

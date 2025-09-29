@@ -4,6 +4,7 @@ namespace App\Livewire\Recaudo\Comunicados;
 
 use App\DTOs\Recaudo\Comunicados\CreateCollectionNoticeRunDto;
 use App\Models\CollectionNoticeType;
+use App\Services\Uploads\ChunkedUploadManager;
 use App\UseCases\Recaudo\Comunicados\CreateCollectionNoticeRunUseCase;
 use Carbon\Carbon;
 use Illuminate\Contracts\View\View;
@@ -47,6 +48,11 @@ class CreateRunModal extends Component
      * @var array<string, mixed>
      */
     public array $files = [];
+
+    /**
+     * @var array<int, string|null>
+     */
+    public array $activeUploadSessions = [];
 
     protected function messages(): array
     {
@@ -93,6 +99,7 @@ class CreateRunModal extends Component
         $this->period = '';
         $this->periodReadonly = false;
         $this->periodValue = '';
+        $this->activeUploadSessions = [];
 
         if (! filled($value)) {
             $this->broadcastFormValidity();
@@ -148,6 +155,7 @@ class CreateRunModal extends Component
             && $this->periodInputIsValid()
             && count($this->dataSources) > 0
             && $this->allFilesSelected()
+            && empty($this->activeUploadSessions)
             && $this->getErrorBag()->isEmpty();
     }
 
@@ -183,7 +191,7 @@ class CreateRunModal extends Component
     public function updatedOpen(bool $value): void
     {
         if (! $value) {
-            $this->reset(['typeId', 'dataSources', 'files', 'periodMode', 'period', 'periodReadonly', 'periodValue']);
+            $this->reset(['typeId', 'dataSources', 'files', 'periodMode', 'period', 'periodReadonly', 'periodValue', 'activeUploadSessions']);
             $this->resetValidation();
             $this->broadcastFormValidity();
         }
@@ -226,7 +234,9 @@ class CreateRunModal extends Component
             return;
         }
 
-        $this->resetFileSelection($dataSourceId);
+        $uploadId = $this->extractUploadId($payload);
+
+        $this->markDataSourceAsUploading($dataSourceId, $uploadId);
 
         $this->logChunkActivity('uploading', $dataSourceId, $this->buildPayloadContext($payload));
 
@@ -236,7 +246,7 @@ class CreateRunModal extends Component
     #[On('collection-run::chunkUploaded')]
     public function handleCollectionRunChunkUploaded(mixed ...$arguments): void
     {
-        ['dataSourceId' => $dataSourceId, 'file' => $file] = $this->resolveUploadEventArguments(...$arguments);
+        ['dataSourceId' => $dataSourceId, 'file' => $file, 'uploadId' => $uploadId] = $this->resolveUploadEventArguments(...$arguments);
 
         if ($dataSourceId <= 0 || ! is_array($file)) {
             $this->skipRender();
@@ -244,10 +254,13 @@ class CreateRunModal extends Component
             return;
         }
 
+        $uploadId ??= $this->peekActiveUploadId($dataSourceId);
+
         $normalizedChunkUpload = $this->normalizeChunkUploadedFile($file);
 
         if ($normalizedChunkUpload !== null) {
             $this->tryStoreUploadedFileMetadata($dataSourceId, $normalizedChunkUpload);
+            $this->unmarkDataSourceAsUploading($dataSourceId);
 
             $this->skipRender();
 
@@ -257,6 +270,7 @@ class CreateRunModal extends Component
         try {
             $uploadedFile = TemporaryUploadedFile::unserializeFromLivewireRequest($file);
         } catch (Throwable $exception) {
+            $this->unmarkDataSourceAsUploading($dataSourceId);
             $this->handleUploadedFileException($dataSourceId, 'uploaded_exception', $exception, [
                 'payload_keys' => array_keys($file),
             ]);
@@ -267,6 +281,7 @@ class CreateRunModal extends Component
         }
 
         if (! $uploadedFile instanceof TemporaryUploadedFile) {
+            $this->unmarkDataSourceAsUploading($dataSourceId);
             $this->logChunkActivity('uploaded_invalid', $dataSourceId, [
                 'payload_keys' => array_keys($file),
             ]);
@@ -279,6 +294,7 @@ class CreateRunModal extends Component
         try {
             $normalized = $this->normalizeTemporaryUpload($uploadedFile, $dataSourceId);
         } catch (Throwable $exception) {
+            $this->unmarkDataSourceAsUploading($dataSourceId);
             $this->handleUploadedFileException(
                 $dataSourceId,
                 'uploaded_store_failed',
@@ -293,6 +309,7 @@ class CreateRunModal extends Component
         }
 
         $this->tryStoreUploadedFileMetadata($dataSourceId, $normalized);
+        $this->unmarkDataSourceAsUploading($dataSourceId);
 
         $this->logChunkActivity('uploaded', $dataSourceId, [
             'temporary_filename' => $uploadedFile->getFilename(),
@@ -320,6 +337,7 @@ class CreateRunModal extends Component
         }
 
         $this->tryStoreUploadedFileMetadata($dataSourceId, $normalized);
+        $this->unmarkDataSourceAsUploading($dataSourceId);
 
         $this->skipRender();
     }
@@ -346,7 +364,7 @@ class CreateRunModal extends Component
     }
 
     /**
-     * @return array{dataSourceId:int, file:array<string, mixed>|null}
+     * @return array{dataSourceId:int, file:array<string, mixed>|null, uploadId:?string}
      */
     private function resolveUploadEventArguments(mixed ...$arguments): array
     {
@@ -356,6 +374,7 @@ class CreateRunModal extends Component
             return [
                 'dataSourceId' => $this->extractDataSourceId($payload),
                 'file' => isset($payload['file']) && is_array($payload['file']) ? $payload['file'] : null,
+                'uploadId' => $this->extractUploadId($payload),
             ];
         }
 
@@ -365,6 +384,7 @@ class CreateRunModal extends Component
         return [
             'dataSourceId' => $this->extractDataSourceId($first),
             'file' => is_array($second) ? $second : null,
+            'uploadId' => $this->extractUploadId($first),
         ];
     }
 
@@ -379,6 +399,105 @@ class CreateRunModal extends Component
         }
 
         return 0;
+    }
+
+    private function extractUploadId(mixed $payload): ?string
+    {
+        if (is_array($payload)) {
+            if (isset($payload['uploadId'])) {
+                return $this->normalizeUploadId($payload['uploadId']);
+            }
+
+            if (isset($payload['upload_id'])) {
+                return $this->normalizeUploadId($payload['upload_id']);
+            }
+        }
+
+        if (is_string($payload)) {
+            return $this->normalizeUploadId($payload);
+        }
+
+        return null;
+    }
+
+    private function extractFilePath(?array $payload): ?string
+    {
+        if (! is_array($payload)) {
+            return null;
+        }
+
+        $path = null;
+
+        if (isset($payload['filePath']) && is_string($payload['filePath'])) {
+            $path = $payload['filePath'];
+        } elseif (isset($payload['file_path']) && is_string($payload['file_path'])) {
+            $path = $payload['file_path'];
+        }
+
+        if ($path === null) {
+            return null;
+        }
+
+        $trimmed = trim($path);
+
+        return $trimmed === '' ? null : $trimmed;
+    }
+
+    private function normalizeUploadId(mixed $value): ?string
+    {
+        if (! is_string($value)) {
+            return null;
+        }
+
+        $trimmed = trim($value);
+
+        if ($trimmed === '') {
+            return null;
+        }
+
+        return preg_match('/^[A-Za-z0-9_-]{10,191}$/', $trimmed) === 1 ? $trimmed : null;
+    }
+
+    private function markDataSourceAsUploading(int $dataSourceId, ?string $uploadId): void
+    {
+        $this->activeUploadSessions[$dataSourceId] = $uploadId;
+        $this->broadcastFormValidity();
+    }
+
+    private function unmarkDataSourceAsUploading(int $dataSourceId): ?string
+    {
+        $uploadId = $this->activeUploadSessions[$dataSourceId] ?? null;
+
+        unset($this->activeUploadSessions[$dataSourceId]);
+
+        $this->broadcastFormValidity();
+
+        return $this->normalizeUploadId($uploadId);
+    }
+
+    private function peekActiveUploadId(int $dataSourceId): ?string
+    {
+        return $this->normalizeUploadId($this->activeUploadSessions[$dataSourceId] ?? null);
+    }
+
+    private function discardChunkUpload(?string $uploadId): void
+    {
+        $normalized = $this->normalizeUploadId($uploadId);
+
+        if ($normalized === null) {
+            return;
+        }
+
+        try {
+            app(ChunkedUploadManager::class)->discardUpload($normalized);
+        } catch (Throwable $exception) {
+            Log::warning('No fue posible descartar la carga fragmentada cancelada.', [
+                'component' => static::class,
+                'upload_id' => $normalized,
+                'exception_class' => $exception::class,
+                'exception_message' => $exception->getMessage(),
+            ]);
+        }
     }
 
     /**
@@ -415,18 +534,45 @@ class CreateRunModal extends Component
         $message = isset($payload['message']) && is_string($payload['message'])
             ? $payload['message']
             : null;
-
-        $this->resetFileSelection($dataSourceId);
-
-        if ($status === 'failed' && $message) {
-            $this->addError('files.' . $dataSourceId, $message);
-        }
+        $activeUploadId = $this->unmarkDataSourceAsUploading($dataSourceId);
+        $uploadId = $this->extractUploadId($payload) ?? $activeUploadId;
 
         $context = array_merge(['status' => $status], $this->buildPayloadContext($payload));
 
-        $this->logChunkActivity('upload_' . $status, $dataSourceId, array_filter($context));
+        if ($status === 'cancelled') {
+            $this->discardChunkUpload($uploadId);
+            $this->logChunkActivity('upload_' . $status, $dataSourceId, array_filter($context));
+            $this->skipRender();
 
-        $this->broadcastFormValidity();
+            return;
+        }
+
+        if ($status === 'failed') {
+            $this->discardChunkUpload($uploadId);
+
+            if ($message) {
+                $this->addError('files.' . $dataSourceId, $message);
+            }
+
+            $this->resetFileSelection($dataSourceId);
+
+            $this->logChunkActivity('upload_' . $status, $dataSourceId, array_filter($context));
+            $this->skipRender();
+
+            return;
+        }
+
+        if ($status === 'cleared') {
+            $filePath = $this->extractFilePath($payload);
+            $this->resetFileSelection($dataSourceId, true, $filePath);
+
+            $this->logChunkActivity('upload_' . $status, $dataSourceId, array_filter($context));
+            $this->skipRender();
+
+            return;
+        }
+
+        $this->logChunkActivity('upload_' . $status, $dataSourceId, array_filter($context));
         $this->skipRender();
     }
 
@@ -554,7 +700,7 @@ class CreateRunModal extends Component
     #[On('openCreateRunModal')]
     public function handleOpenCreateRunModal(): void
     {
-        $this->reset(['typeId', 'dataSources', 'files', 'periodMode', 'period', 'periodReadonly', 'periodValue']);
+        $this->reset(['typeId', 'dataSources', 'files', 'periodMode', 'period', 'periodReadonly', 'periodValue', 'activeUploadSessions']);
         $this->resetValidation();
         $this->open = true;
         $this->broadcastFormValidity();
@@ -562,7 +708,7 @@ class CreateRunModal extends Component
 
     public function cancel(): void
     {
-        $this->reset(['open', 'typeId', 'dataSources', 'files', 'periodMode', 'period', 'periodReadonly', 'periodValue']);
+        $this->reset(['open', 'typeId', 'dataSources', 'files', 'periodMode', 'period', 'periodReadonly', 'periodValue', 'activeUploadSessions']);
         $this->resetValidation();
         $this->broadcastFormValidity();
     }
@@ -570,6 +716,14 @@ class CreateRunModal extends Component
     public function submit(): void
     {
         $this->validate();
+
+        if (! empty($this->activeUploadSessions)) {
+            $this->addError('general', __('Aún hay cargas de archivos en progreso. Espera a que finalicen.'));
+            $this->broadcastFormValidity();
+            $this->dispatch('toast', type: 'error', message: __('Debes esperar a que finalicen las cargas de archivos en progreso.'));
+
+            return;
+        }
 
         $userId = (int) auth()->id();
 
@@ -722,11 +876,21 @@ class CreateRunModal extends Component
         }
     }
 
-    protected function resetFileSelection(int $dataSourceId): void
+    protected function resetFileSelection(int $dataSourceId, bool $deletePhysical = false, ?string $overridePath = null): void
     {
         $key = (string) $dataSourceId;
 
+        $existingPath = isset($this->files[$key]['path']) ? (string) $this->files[$key]['path'] : null;
+
         unset($this->files[$key]);
+
+        if ($deletePhysical) {
+            $path = $overridePath ?? $existingPath;
+
+            if ($path) {
+                $this->cleanupTemporaryFile($path);
+            }
+        }
 
         $this->resetValidation(['files.' . $key]);
 
@@ -751,7 +915,14 @@ class CreateRunModal extends Component
     {
         $normalized = $this->sanitizeUploadedFileMetadata($dataSourceId, $file);
 
-        $this->files[(string) $dataSourceId] = $normalized;
+        $key = (string) $dataSourceId;
+        $previousPath = isset($this->files[$key]['path']) ? (string) $this->files[$key]['path'] : null;
+
+        $this->files[$key] = $normalized;
+
+        if ($previousPath && $previousPath !== $normalized['path']) {
+            $this->cleanupTemporaryFile($previousPath);
+        }
 
         $this->resetValidation(['files.' . $dataSourceId]);
 
