@@ -209,11 +209,15 @@ class CreateRunModal extends Component
     }
 
     #[On('collection-run-uploads::state-updated')]
-    public function handleUploadsStateUpdated(array $payload): void
+    public function handleUploadsStateUpdated(array $files = [], bool $ready = false): void
     {
-        $files = isset($payload['files']) && is_array($payload['files']) ? $payload['files'] : [];
+        if (isset($files['files']) && is_array($files['files'])) {
+            $ready = (bool) ($files['ready'] ?? $ready);
+            $files = $files['files'];
+        }
+
         $this->uploadedFiles = $this->sanitizeUploadedFilesPayload($files);
-        $this->uploadsReady = (bool) ($payload['ready'] ?? false);
+        $this->uploadsReady = $ready;
 
         if ($this->uploadsReady) {
             $this->resetErrorBag(['files']);
