@@ -172,6 +172,7 @@ export function collectionRunUploader(options) {
         uploadId: null,
         wireWatcherStop: null,
         currentSession: null,
+        maxFileSize: sanitized.maxFileSize,
 
         init() {
             configureLivewireChunkSize(this.chunkSize);
@@ -208,8 +209,8 @@ export function collectionRunUploader(options) {
             this.isUploading = true;
             this.uploadId = generateUploadId();
 
-            //this.dispatchLivewireEvent('collection-run::chunkUploading', { dataSourceId: this.dataSourceId });
-            //this.dispatchLivewireEvent('chunk-uploading', { dataSourceId: this.dataSourceId });
+            this.dispatchLifecycle('collection-run::chunkUploading', { status: 'uploading' });
+            this.dispatchLifecycle('chunk-uploading', { status: 'uploading' });
 
             try {
                 const session = new ChunkedUploadSession({
@@ -249,11 +250,23 @@ export function collectionRunUploader(options) {
                     this.progress = 0;
                     this.errorMessage = '';
                     this.fileData = null;
+
+                    this.dispatchLifecycle('collection-run::chunkUploadCancelled', { status: 'cancelled' });
+                    this.dispatchLifecycle('chunk-upload-cancelled', { status: 'cancelled' });
                 } else {
                     this.status = 'error';
                     this.progress = 0;
                     this.errorMessage = extractErrorMessage(error);
                     this.fileData = null;
+
+                    this.dispatchLifecycle('collection-run::chunkFailed', {
+                        status: 'failed',
+                        message: this.errorMessage,
+                    });
+                    this.dispatchLifecycle('chunk-upload-failed', {
+                        status: 'failed',
+                        message: this.errorMessage,
+                    });
                 }
             } finally {
                 this.isUploading = false;
@@ -262,15 +275,38 @@ export function collectionRunUploader(options) {
         },
 
         progressLabel() {
-            if (this.isUploading || this.status === 'completed') {
-                return `${Math.round(this.progress)}%`;
+            if (this.isUploading) {
+                const summary = this.fileSummary();
+                const percentage = `${Math.round(this.progress)}%`;
+
+                return summary ? `${percentage} · ${summary}` : percentage;
+            }
+
+            if (this.status === 'completed') {
+                return this.fileSummary();
             }
 
             if (this.fileSize > 0) {
-                return humanFileSize(this.fileSize);
+                return this.fileSummary();
             }
 
             return '';
+        },
+
+        fileSummary() {
+            const fileLabel = humanFileSize(this.fileSize);
+
+            if (this.maxFileSize > 0) {
+                const maxLabel = humanFileSize(this.maxFileSize);
+
+                if (fileLabel) {
+                    return `${fileLabel} / ${maxLabel}`;
+                }
+
+                return `0 B / ${maxLabel}`;
+            }
+
+            return fileLabel;
         },
 
         applyUploadedFile(file) {
@@ -315,6 +351,30 @@ export function collectionRunUploader(options) {
             }
 
             this.isUploading = false;
+        },
+
+        cancelUpload() {
+            if (this.isUploading) {
+                this.cancelOngoingUpload();
+
+                return;
+            }
+
+            if (this.status === 'completed') {
+                const filePath = this.fileData?.path ?? null;
+
+                this.clearUploadedFile();
+
+                this.dispatchLifecycle('collection-run::chunkUploadCleared', {
+                    status: 'cleared',
+                    filePath,
+                });
+
+                this.dispatchLifecycle('chunk-upload-cleared', {
+                    status: 'cleared',
+                    filePath,
+                });
+            }
         },
 
         resetInputValue(input) {
@@ -375,6 +435,13 @@ export function collectionRunUploader(options) {
                 Livewire.dispatch(eventName, payload);
             }
         },
+
+        dispatchLifecycle(eventName, payload = {}) {
+            this.dispatchLivewireEvent(eventName, {
+                dataSourceId: this.dataSourceId,
+                ...payload,
+            });
+        },
     };
 }
 
@@ -382,12 +449,14 @@ function normalizeOptions(options) {
     const dataSourceId = Number.isFinite(options?.dataSourceId) ? Number(options.dataSourceId) : 0;
     const uploadUrl = typeof options?.uploadUrl === 'string' ? options.uploadUrl : '';
     const initialFile = normalizeUploadedFile(options?.initialFile ?? null);
+    const maxFileSize = Number.isFinite(options?.maxFileSize) ? Number(options.maxFileSize) : 0;
 
     return {
         dataSourceId,
         uploadUrl,
         initialFile,
         chunkSize: resolveChunkSize(options?.chunkSize),
+        maxFileSize: maxFileSize > 0 ? maxFileSize : 0,
     };
 }
 
@@ -439,7 +508,7 @@ function extractErrorMessage(error) {
 
 function humanFileSize(bytes) {
     if (!Number.isFinite(bytes) || bytes <= 0) {
-        return '';
+        return '0 B';
     }
 
     const units = ['B', 'KB', 'MB', 'GB', 'TB'];

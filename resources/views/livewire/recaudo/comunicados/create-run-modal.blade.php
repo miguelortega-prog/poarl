@@ -66,6 +66,10 @@
                             {{ __('El tipo de comunicado seleccionado no tiene insumos configurados actualmente.') }}
                         </div>
                     @else
+                        <p class="rounded-3xl bg-gray-100 px-4 py-2 text-xs text-gray-600 dark:bg-gray-900/60 dark:text-gray-300">
+                            {{ __('Cada archivo puede pesar máximo :size.', ['size' => $this->maxFileSizeLabel]) }}
+                        </p>
+
                         <div class="rounded-3xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-900/40">
                             <div class="grid grid-cols-12 gap-3 border-b border-gray-200 bg-gray-100 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300">
                                 <div class="col-span-12 tablet:col-span-6 desktop:col-span-6">{{ __('Nombre – Código') }}</div>
@@ -102,6 +106,7 @@
                                                     uploadUrl: '{{ route('recaudo.comunicados.uploads.chunk') }}',
                                                     chunkSize: @js((int) config('chunked-uploads.collection_notices.chunk_size')),
                                                     initialFile: @js(is_array($selectedFile) ? $selectedFile : null),
+                                                    maxFileSize: @js($this->maxFileSizeBytes),
                                                 })"
                                                 x-init="(() => { init(); $el.addEventListener('alpine:destroy', () => destroy(), { once: true }); })()"
                                                 :class="{ 'opacity-60': isUploading }"
@@ -125,6 +130,18 @@
                                                         class="sr-only"
                                                     />
                                                 </label>
+
+                                                <button
+                                                    type="button"
+                                                    class="inline-flex w-full items-center justify-center gap-2 rounded-3xl border border-danger bg-white px-4 py-2 text-xs font-semibold text-danger shadow-sm transition hover:bg-danger/10 focus:outline-none focus:ring-2 focus:ring-danger focus:ring-offset-2 focus:ring-offset-white disabled:cursor-not-allowed disabled:opacity-60 dark:border-danger/60 dark:bg-gray-900 dark:text-danger-200 dark:hover:bg-danger/20 dark:focus:ring-offset-gray-900 tablet:w-auto"
+                                                    x-show="isUploading || status === 'completed'"
+                                                    x-cloak
+                                                    @click="cancelUpload()"
+                                                    :disabled="isUploading && !currentSession"
+                                                >
+                                                    <i :class="isUploading ? 'fa-solid fa-ban' : 'fa-solid fa-xmark'"></i>
+                                                    <span x-text="isUploading ? '{{ __('Cancelar carga') }}' : '{{ __('Quitar archivo') }}'"></span>
+                                                </button>
 
                                                 <!-- Barra de progreso -->
                                                 <div x-show="isUploading" x-cloak class="h-2 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
