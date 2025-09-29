@@ -151,6 +151,15 @@
                                                     ></div>
                                                 </div>
 
+                                                <div
+                                                    x-show="isUploading"
+                                                    x-cloak
+                                                    class="flex w-full justify-between text-xs text-gray-600 dark:text-gray-300"
+                                                >
+                                                    <span class="font-medium" x-text="`${Math.round(progress)}%`"></span>
+                                                    <span class="ml-2 text-right" x-text="fileSummary()"></span>
+                                                </div>
+
                                                 <!-- Nombre solo cuando termine -->
                                                 <div x-show="status === 'completed'" x-cloak>
                                                     <div class="flex w-full items-center justify-between gap-2 rounded-3xl bg-gray-100 px-3 py-2 text-xs text-gray-700 dark:bg-gray-800 dark:text-gray-300">
@@ -183,8 +192,12 @@
 
             <div
                 class="flex w-full justify-end gap-3"
-                x-data="{ canSubmit: @js($isFormValid) }"
-                x-on:collection-run-form-state-changed.window="canSubmit = Boolean($event.detail?.isValid)"
+                x-data="{
+                    canSubmit: @js($isFormValid),
+                    formReady: $wire.entangle('formReady').live,
+                }"
+                x-effect="canSubmit = Boolean(formReady)"
+                x-on:collection-run-form-state-changed.window="canSubmit = Boolean($event.detail?.isValid); formReady = canSubmit"
             >
                 <button
                     type="button"
