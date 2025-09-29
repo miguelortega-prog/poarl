@@ -903,9 +903,8 @@ class CreateRunModal extends Component
 
         $this->dispatch('collection-run-form-state-changed', isValid: $this->formReady);
 
-        $this->dispatchBrowserEvent('collection-run-form-state-changed', [
-            'isValid' => $this->formReady,
-        ]);
+        $this->dispatch('collection-run-form-state-changed', isValid: $this->formReady)
+            ->toBrowser();
     }
 
     /**
