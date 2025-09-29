@@ -95,6 +95,8 @@ class CreateRunModal extends Component
         $this->periodValue = '';
 
         if (! filled($value)) {
+            $this->broadcastFormValidity();
+
             return;
         }
 
@@ -136,6 +138,8 @@ class CreateRunModal extends Component
             $this->periodReadonly = false;
             $this->periodValue = '';
         }
+
+        $this->broadcastFormValidity();
     }
 
     public function getIsFormValidProperty(): bool
@@ -171,6 +175,7 @@ class CreateRunModal extends Component
         if (! $value) {
             $this->reset(['typeId', 'dataSources', 'files', 'periodMode', 'period', 'periodReadonly', 'periodValue']);
             $this->resetValidation();
+            $this->broadcastFormValidity();
         }
     }
 
@@ -178,6 +183,7 @@ class CreateRunModal extends Component
     {
         if ($propertyName === 'typeId') {
             $this->validateOnly('typeId');
+            $this->broadcastFormValidity();
 
             return;
         }
@@ -185,13 +191,19 @@ class CreateRunModal extends Component
         if ($propertyName === 'period' && $this->periodMode === 'write') {
             $this->periodValue = $this->period;
             $this->validateOnly('period');
+            $this->broadcastFormValidity();
 
             return;
         }
 
         if (str_starts_with($propertyName, 'files.')) {
             $this->validateOnly($propertyName);
+            $this->broadcastFormValidity();
+
+            return;
         }
+
+        $this->broadcastFormValidity();
     }
 
     #[On('collection-run::chunkUploading')]
@@ -381,12 +393,14 @@ class CreateRunModal extends Component
         $this->reset(['typeId', 'dataSources', 'files', 'periodMode', 'period', 'periodReadonly', 'periodValue']);
         $this->resetValidation();
         $this->open = true;
+        $this->broadcastFormValidity();
     }
 
     public function cancel(): void
     {
         $this->reset(['open', 'typeId', 'dataSources', 'files', 'periodMode', 'period', 'periodReadonly', 'periodValue']);
         $this->resetValidation();
+        $this->broadcastFormValidity();
     }
 
     public function submit(): void
@@ -535,6 +549,8 @@ class CreateRunModal extends Component
         unset($this->files[$key]);
 
         $this->resetValidation(['files.' . $key]);
+
+        $this->broadcastFormValidity();
     }
 
     protected function logChunkActivity(string $event, int $dataSourceId, array $context = []): void
@@ -556,5 +572,12 @@ class CreateRunModal extends Component
         $this->files[(string) $dataSourceId] = $file;
 
         $this->resetValidation(['files.' . $dataSourceId]);
+
+        $this->broadcastFormValidity();
+    }
+
+    private function broadcastFormValidity(): void
+    {
+        $this->dispatch('collection-run-form-state-changed', isValid: $this->isFormValid);
     }
 }

@@ -164,7 +164,11 @@
         <x-slot name="footer">
             @php($isFormValid = $this->isFormValid)
 
-            <div class="flex w-full justify-end gap-3">
+            <div
+                class="flex w-full justify-end gap-3"
+                x-data="{ canSubmit: @js($isFormValid) }"
+                x-on:collection-run-form-state-changed.window="canSubmit = Boolean($event.detail?.isValid)"
+            >
                 <button
                     type="button"
                     wire:click="cancel"
@@ -176,7 +180,8 @@
                 <button
                     type="submit"
                     form="create-run-form"
-                    @if (! $isFormValid) disabled aria-disabled="true" @else aria-disabled="false" @endif
+                    :disabled="!canSubmit"
+                    :aria-disabled="(!canSubmit).toString()"
                     class="inline-flex items-center justify-center gap-2 rounded-3xl bg-secondary-900 px-5 py-2 text-button font-semibold text-primary transition hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-secondary focus:ring-offset-2 focus:ring-offset-white disabled:cursor-not-allowed disabled:opacity-60 dark:focus:ring-offset-gray-900"
                 >
                     {{ __('Generar Trabajo') }}
