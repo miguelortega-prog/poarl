@@ -635,20 +635,20 @@ class CreateRunModal extends Component
     protected function allowedExtensionsFromRequirement(string $extension): array
     {
         return match ($extension) {
-            'csv' => ['csv', 'txt'],
+            'csv' => ['csv', 'txt', 'xls', 'xlsx'],
             'xls' => ['xls'],
             'xlsx' => ['xlsx', 'xls'],
-            default => ['csv', 'xls', 'xlsx'],
+            default => ['csv', 'xls', 'xlsx', 'txt'],
         };
     }
 
     protected function extensionErrorMessage(string $extension): string
     {
         return match ($extension) {
-            'csv' => __('Formato inválido. Este insumo solo acepta archivos CSV o TXT.'),
+            'csv' => __('Formato inválido. Este insumo permite archivos CSV, TXT, XLS o XLSX.'),
             'xls' => __('Formato inválido. Este insumo solo acepta archivos XLS.'),
             'xlsx' => __('Formato inválido. Este insumo solo acepta archivos XLSX o XLS.'),
-            default => __('Formato inválido. Este insumo permite archivos CSV, XLS o XLSX.'),
+            default => __('Formato inválido. Este insumo permite archivos CSV, XLS, XLSX o TXT.'),
         };
     }
 
@@ -861,7 +861,12 @@ class CreateRunModal extends Component
     protected function allowedMimesFromRequirement(string $extension): array
     {
         return match ($extension) {
-            'csv' => ['text/csv', 'text/plain', 'application/vnd.ms-excel'],
+            'csv' => [
+                'text/csv',
+                'text/plain',
+                'application/vnd.ms-excel',
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            ],
             'xls' => ['application/vnd.ms-excel'],
             'xlsx' => ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel'],
             default => [
