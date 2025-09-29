@@ -41,6 +41,7 @@ class ChunkedUploadSession {
         this.currentController = null;
         this.aborted = false;
         this.httpClient = resolveHttpClient();
+        this.sendCredentials = shouldSendCredentials(this.uploadUrl);
     }
 
     async start() {
@@ -115,23 +116,12 @@ class ChunkedUploadSession {
         this.currentController = controller;
 
         try {
-            const response = await this.httpClient.post(this.uploadUrl, formData, {
-                signal: controller.signal,
-                withCredentials: shouldSendCredentials(),
-                headers: this.csrfToken
-                    ? { 'X-CSRF-TOKEN': this.csrfToken }
-                    : undefined,
-                onUploadProgress: (event) => {
-                    if (!this.onProgress) {
-                        return;
-                    }
-
-                    const loaded = Number.isFinite(event.loaded) ? event.loaded : safeChunkSize;
-                    const currentBytes = Math.min(previousBytes + loaded, totalBytes);
-                    const progress = Math.min((currentBytes / totalBytes) * 100, 100);
-
-                    this.onProgress(progress);
-                },
+            const response = await this.dispatchChunkRequest({
+                controller,
+                formData,
+                previousBytes,
+                safeChunkSize,
+                totalBytes,
             });
 
             if (this.onProgress) {
@@ -140,7 +130,7 @@ class ChunkedUploadSession {
                 this.onProgress(finalProgress);
             }
 
-            return response?.data ?? {};
+            return response;
         } catch (error) {
             if (controller.signal.aborted || isAxiosCancellation(error)) {
                 throw new UploadAbortedError();
@@ -153,9 +143,69 @@ class ChunkedUploadSession {
             }
         }
     }
+
+    async dispatchChunkRequest({ controller, formData, previousBytes, safeChunkSize, totalBytes }) {
+        if (supportsFetchUploads()) {
+            return this.sendChunkWithFetch({ controller, formData });
+        }
+
+        return this.sendChunkWithAxios({ controller, formData, previousBytes, safeChunkSize, totalBytes });
+    }
+
+    async sendChunkWithFetch({ controller, formData }) {
+        const headers = this.csrfToken
+            ? { 'X-CSRF-TOKEN': this.csrfToken }
+            : {};
+
+        const credentialsMode = this.sendCredentials ? 'include' : 'omit';
+
+        const response = await window.fetch(this.uploadUrl, {
+            method: 'POST',
+            body: formData,
+            signal: controller.signal,
+            credentials: credentialsMode,
+            headers,
+            redirect: 'follow',
+        });
+
+        if (!response.ok) {
+            throw new Error(await extractResponseErrorMessage(response));
+        }
+
+        return parseJsonResponse(await response.text());
+    }
+
+    async sendChunkWithAxios({ controller, formData, previousBytes, safeChunkSize, totalBytes }) {
+        const response = await this.httpClient.post(this.uploadUrl, formData, {
+            signal: controller.signal,
+            withCredentials: this.sendCredentials,
+            headers: this.csrfToken
+                ? { 'X-CSRF-TOKEN': this.csrfToken }
+                : undefined,
+            onUploadProgress: (event) => {
+                if (!this.onProgress) {
+                    return;
+                }
+
+                const loaded = Number.isFinite(event.loaded) ? event.loaded : safeChunkSize;
+                const currentBytes = Math.min(previousBytes + loaded, totalBytes);
+                const progress = Math.min((currentBytes / totalBytes) * 100, 100);
+
+                this.onProgress(progress);
+            },
+        });
+
+        return response?.data ?? {};
+    }
 }
 
-function shouldSendCredentials() {
+function supportsFetchUploads() {
+    return typeof window !== 'undefined'
+        && typeof window.fetch === 'function'
+        && typeof FormData !== 'undefined';
+}
+
+function shouldSendCredentials(uploadUrl) {
     if (typeof window === 'undefined') {
         return true;
     }
@@ -166,7 +216,17 @@ function shouldSendCredentials() {
         return globalOverride;
     }
 
-    return true;
+    if (typeof uploadUrl !== 'string' || uploadUrl.trim() === '') {
+        return true;
+    }
+
+    try {
+        const resolvedUrl = new URL(uploadUrl, window.location.origin);
+        return resolvedUrl.origin === window.location.origin;
+    } catch (error) {
+        console.warn('No fue posible resolver el origen del endpoint de carga.', error);
+        return true;
+    }
 }
 
 export function collectionRunUploader(options) {
@@ -506,6 +566,40 @@ function normalizeAxiosError(error) {
     }
 
     return new Error('No fue posible cargar el archivo. Intenta de nuevo.');
+}
+
+async function extractResponseErrorMessage(response) {
+    try {
+        const clone = response.clone();
+        const data = await clone.json();
+
+        if (data && typeof data.message === 'string' && data.message.trim() !== '') {
+            return data.message;
+        }
+    } catch (error) {
+        // Ignorar errores de parseo y continuar con el texto plano.
+    }
+
+    const text = await response.text();
+
+    if (typeof text === 'string' && text.trim() !== '') {
+        return text;
+    }
+
+    return 'No fue posible cargar el archivo. Intenta de nuevo.';
+}
+
+function parseJsonResponse(payload) {
+    if (typeof payload !== 'string' || payload.trim() === '') {
+        return {};
+    }
+
+    try {
+        return JSON.parse(payload);
+    } catch (error) {
+        console.warn('La respuesta del servidor no es un JSON válido.', error);
+        return {};
+    }
 }
 
 function extractErrorMessage(error) {
