@@ -226,6 +226,16 @@ class CreateRunModal extends Component
             return;
         }
 
+        $normalizedChunkUpload = $this->normalizeChunkUploadedFile($file);
+
+        if ($normalizedChunkUpload !== null) {
+            $this->storeUploadedFileMetadata($dataSourceId, $normalizedChunkUpload);
+
+            $this->skipRender();
+
+            return;
+        }
+
         try {
             $uploadedFile = TemporaryUploadedFile::unserializeFromLivewireRequest($file);
         } catch (Throwable $exception) {
@@ -372,19 +382,13 @@ class CreateRunModal extends Component
             return;
         }
 
-        $path = (string) ($file['path'] ?? '');
+        $normalized = $this->normalizeChunkUploadedFile($file);
 
-        if ($path === '') {
+        if ($normalized === null) {
             return;
         }
 
-        $this->storeUploadedFileMetadata($dataSourceId, [
-            'path' => $path,
-            'original_name' => (string) ($file['original_name'] ?? ''),
-            'size' => isset($file['size']) ? (int) $file['size'] : 0,
-            'mime' => $file['mime'] ?? null,
-            'extension' => $file['extension'] ?? null,
-        ]);
+        $this->storeUploadedFileMetadata($dataSourceId, $normalized);
     }
 
     #[On('openCreateRunModal')]
@@ -579,5 +583,40 @@ class CreateRunModal extends Component
     private function broadcastFormValidity(): void
     {
         $this->dispatch('collection-run-form-state-changed', isValid: $this->isFormValid);
+    }
+
+    /**
+     * @param array<string, mixed> $file
+     *
+     * @return array{path: string, original_name: string, size: int, mime: string|null, extension: string|null}|null
+     */
+    private function normalizeChunkUploadedFile(array $file): ?array
+    {
+        $path = isset($file['path']) ? (string) $file['path'] : '';
+        $originalName = isset($file['original_name']) ? (string) $file['original_name'] : '';
+        $size = isset($file['size']) ? (int) $file['size'] : 0;
+
+        if ($path !== '' && $size <= 0 && Storage::disk('collection_temp')->exists($path)) {
+            $size = (int) Storage::disk('collection_temp')->size($path);
+        }
+
+        if ($path === '' || $originalName === '' || $size <= 0) {
+            return null;
+        }
+
+        $mime = isset($file['mime']) && is_string($file['mime']) ? $file['mime'] : null;
+        $extension = isset($file['extension']) && is_string($file['extension']) ? strtolower($file['extension']) : null;
+
+        if ($extension !== null && $extension === '') {
+            $extension = null;
+        }
+
+        return [
+            'path' => $path,
+            'original_name' => $originalName,
+            'size' => $size,
+            'mime' => $mime,
+            'extension' => $extension,
+        ];
     }
 }
