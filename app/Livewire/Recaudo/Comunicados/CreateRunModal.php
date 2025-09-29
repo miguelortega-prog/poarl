@@ -2,11 +2,9 @@
 
 namespace App\Livewire\Recaudo\Comunicados;
 
-use App\Contracts\Recaudo\Comunicados\CollectionRunFormContext;
 use App\DTOs\Recaudo\Comunicados\CollectionRunUploadedFileDto;
 use App\DTOs\Recaudo\Comunicados\CreateRunFormDataDto;
 use App\Models\CollectionNoticeType;
-use App\Services\Recaudo\Comunicados\CollectionRunChunkManager;
 use App\Services\Recaudo\Comunicados\CollectionRunUploadedFileSanitizer;
 use App\Services\Recaudo\Comunicados\CreateCollectionNoticeRunSubmissionHandler;
 use Carbon\Carbon;
@@ -17,7 +15,7 @@ use Livewire\Component;
 use RuntimeException;
 use Throwable;
 
-class CreateRunModal extends Component implements CollectionRunFormContext
+class CreateRunModal extends Component
 {
     public bool $open = false;
 
@@ -44,63 +42,39 @@ class CreateRunModal extends Component implements CollectionRunFormContext
     public array $dataSources = [];
 
     /**
-     * @var array<string, mixed>
+     * @var array<int, array{path:string, original_name:string, size:int, mime:?string, extension:?string|null}>
      */
-    public array $files = [];
+    public array $uploadedFiles = [];
 
-    /**
-     * @var array<string, bool>
-     */
-    public array $uploadingSources = [];
-
-    /**
-     * @var array<string, bool>
-     */
-    public array $staleUploads = [];
+    public bool $uploadsReady = false;
 
     public bool $formReady = false;
-
-    private CollectionRunChunkManager $chunkManager;
 
     private CreateCollectionNoticeRunSubmissionHandler $submissionHandler;
 
     private CollectionRunUploadedFileSanitizer $uploadedFileSanitizer;
 
     public function boot(
-        CollectionRunChunkManager $chunkManager,
         CreateCollectionNoticeRunSubmissionHandler $submissionHandler,
         CollectionRunUploadedFileSanitizer $uploadedFileSanitizer
     ): void {
-        $this->chunkManager = $chunkManager;
         $this->submissionHandler = $submissionHandler;
         $this->uploadedFileSanitizer = $uploadedFileSanitizer;
     }
 
     protected function messages(): array
     {
-        $messages = [
+        return [
             'typeId.required' => 'Selecciona un tipo de comunicado.',
             'typeId.exists' => 'Selecciona un tipo de comunicado válido.',
             'period.required' => 'Debes ingresar el periodo en formato YYYYMM.',
             'period.regex' => 'El periodo debe tener formato YYYYMM.',
-            'files.*.required' => 'Debes adjuntar el archivo correspondiente a este insumo.',
-            'files.*.array' => 'Adjunta un archivo válido.',
-            'files.*.path.required' => 'La carga del archivo aún no finaliza.',
-            'files.*.path.string' => 'La ruta temporal del archivo es inválida.',
-            'files.*.original_name.required' => 'No se recibió el nombre del archivo cargado.',
-            'files.*.original_name.string' => 'El nombre del archivo es inválido.',
-            'files.*.size.required' => 'No se detectó el tamaño del archivo cargado.',
-            'files.*.size.integer' => 'El tamaño del archivo es inválido.',
-            'files.*.size.min' => 'El archivo debe contener información.',
         ];
-
-        return $messages;
     }
 
     protected array $validationAttributes = [
         'typeId' => 'tipo de comunicado',
         'period' => 'periodo',
-        'files.*' => 'insumo requerido',
     ];
 
     public function mount(): void
@@ -115,9 +89,8 @@ class CreateRunModal extends Component implements CollectionRunFormContext
     {
         $this->resetValidation(['typeId', 'period', 'files']);
 
-        $this->files = [];
-        $this->uploadingSources = [];
-        $this->staleUploads = [];
+        $this->uploadedFiles = [];
+        $this->uploadsReady = false;
         $this->dataSources = [];
         $this->periodMode = null;
         $this->period = '';
@@ -177,7 +150,7 @@ class CreateRunModal extends Component implements CollectionRunFormContext
         return filled($this->typeId)
             && $this->periodInputIsValid()
             && count($this->dataSources) > 0
-            && $this->allFilesSelected()
+            && $this->uploadsReady
             && $this->getErrorBag()->isEmpty();
     }
 
@@ -191,42 +164,14 @@ class CreateRunModal extends Component implements CollectionRunFormContext
         return $this->getMaximumFileSize();
     }
 
-    protected function allFilesSelected(): bool
-    {
-        if (empty($this->dataSources)) {
-            return false;
-        }
-
-        foreach ($this->dataSources as $dataSource) {
-            $key = (string) ($dataSource['id'] ?? '');
-
-            $file = $this->files[$key] ?? null;
-            $isUploading = (bool) ($this->uploadingSources[$key] ?? false);
-            $isStale = (bool) ($this->staleUploads[$key] ?? false);
-
-            if (
-                $key === ''
-                || ! is_array($file)
-                || empty($file['path'])
-                || $isUploading
-                || $isStale
-            ) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
     public function updatedOpen(bool $value): void
     {
         if (! $value) {
             $this->reset([
                 'typeId',
                 'dataSources',
-                'files',
-                'uploadingSources',
-                'staleUploads',
+                'uploadedFiles',
+                'uploadsReady',
                 'periodMode',
                 'period',
                 'periodReadonly',
@@ -254,20 +199,7 @@ class CreateRunModal extends Component implements CollectionRunFormContext
             return;
         }
 
-        if (str_starts_with($propertyName, 'files.')) {
-            $this->validateOnly($propertyName);
-            $this->broadcastFormState();
-
-            return;
-        }
-
-        if (
-            $propertyName === 'formReady'
-            || $propertyName === 'uploadingSources'
-            || $propertyName === 'staleUploads'
-            || str_starts_with($propertyName, 'uploadingSources.')
-            || str_starts_with($propertyName, 'staleUploads.')
-        ) {
+        if ($propertyName === 'formReady') {
             $this->skipRender();
 
             return;
@@ -276,44 +208,18 @@ class CreateRunModal extends Component implements CollectionRunFormContext
         $this->broadcastFormState();
     }
 
-    #[On('collection-run::chunkUploading')]
-    #[On('chunk-uploading')]
-    public function handleChunkUploadingEvent(mixed $payload = null): void
+    #[On('collection-run-uploads::state-updated')]
+    public function handleUploadsStateUpdated(array $payload): void
     {
-        $this->chunkManager->handleUploading($this, $payload);
-    }
+        $files = isset($payload['files']) && is_array($payload['files']) ? $payload['files'] : [];
+        $this->uploadedFiles = $this->sanitizeUploadedFilesPayload($files);
+        $this->uploadsReady = (bool) ($payload['ready'] ?? false);
 
-    #[On('collection-run::chunkUploaded')]
-    public function handleCollectionRunChunkUploaded(mixed ...$arguments): void
-    {
-        $this->chunkManager->handleUploaded($this, ...$arguments);
-    }
+        if ($this->uploadsReady) {
+            $this->resetErrorBag(['files']);
+        }
 
-    #[On('chunk-uploaded')]
-    public function handleChunkUploaded(?array $payload = null): void
-    {
-        $this->chunkManager->handleLegacyUploadedEvent($this, $payload);
-    }
-
-    #[On('collection-run::chunkFailed')]
-    #[On('chunk-upload-failed')]
-    public function handleChunkUploadFailed(?array $payload = null): void
-    {
-        $this->chunkManager->handleLifecycleEvent($this, $payload, 'failed');
-    }
-
-    #[On('collection-run::chunkUploadCancelled')]
-    #[On('chunk-upload-cancelled')]
-    public function handleChunkUploadCancelled(?array $payload = null): void
-    {
-        $this->chunkManager->handleLifecycleEvent($this, $payload, 'cancelled');
-    }
-
-    #[On('collection-run::chunkUploadCleared')]
-    #[On('chunk-upload-cleared')]
-    public function handleChunkUploadCleared(?array $payload = null): void
-    {
-        $this->chunkManager->handleLifecycleEvent($this, $payload, 'cleared');
+        $this->broadcastFormState();
     }
 
     protected function rules(): array
@@ -334,66 +240,6 @@ class CreateRunModal extends Component implements CollectionRunFormContext
             ];
         }
 
-        foreach ($this->dataSources as $dataSource) {
-            if (! isset($dataSource['id'])) {
-                continue;
-            }
-
-            $extension = strtolower((string) ($dataSource['extension'] ?? ''));
-            $rules['files.' . $dataSource['id']] = [
-                'required',
-                'array',
-            ];
-
-            $rules['files.' . $dataSource['id'] . '.path'] = [
-                'required',
-                'string',
-                function (string $attribute, $value, $fail) {
-                    if (! is_string($value) || str_contains($value, '..') || ! str_starts_with($value, 'completed/')) {
-                        $fail(__('La ruta del archivo es inválida.'));
-                    }
-                },
-            ];
-            $rules['files.' . $dataSource['id'] . '.original_name'] = ['required', 'string', 'max:255'];
-            $rules['files.' . $dataSource['id'] . '.size'] = [
-                'required',
-                'integer',
-                'min:1',
-                'max:' . $this->getMaximumFileSize(),
-            ];
-            $rules['files.' . $dataSource['id'] . '.mime'] = [
-                'nullable',
-                'string',
-                function (string $attribute, $value, $fail) use ($extension) {
-                    if ($value === null || $value === '') {
-                        return;
-                    }
-
-                    $allowedMimes = $this->uploadedFileSanitizer->allowedMimesFromRequirement(strtolower($extension));
-
-                    if (! in_array(strtolower((string) $value), $allowedMimes, true)) {
-                        $fail(__('El tipo de archivo cargado no está permitido para este insumo.'));
-                    }
-                },
-            ];
-            $rules['files.' . $dataSource['id'] . '.extension'] = [
-                'nullable',
-                'string',
-                function (string $attribute, $value, $fail) use ($extension) {
-                    if ($value === null || $value === '') {
-                        return;
-                    }
-
-                    $value = strtolower((string) $value);
-                    $allowed = $this->uploadedFileSanitizer->allowedExtensionsFromRequirement(strtolower($extension));
-
-                    if (! in_array($value, $allowed, true)) {
-                        $fail($this->uploadedFileSanitizer->extensionErrorMessage($extension));
-                    }
-                },
-            ];
-        }
-
         return $rules;
     }
 
@@ -403,9 +249,8 @@ class CreateRunModal extends Component implements CollectionRunFormContext
         $this->reset([
             'typeId',
             'dataSources',
-            'files',
-            'uploadingSources',
-            'staleUploads',
+            'uploadedFiles',
+            'uploadsReady',
             'periodMode',
             'period',
             'periodReadonly',
@@ -422,9 +267,8 @@ class CreateRunModal extends Component implements CollectionRunFormContext
             'open',
             'typeId',
             'dataSources',
-            'files',
-            'uploadingSources',
-            'staleUploads',
+            'uploadedFiles',
+            'uploadsReady',
             'periodMode',
             'period',
             'periodReadonly',
@@ -437,6 +281,13 @@ class CreateRunModal extends Component implements CollectionRunFormContext
     public function submit(): void
     {
         $this->validate();
+
+        if (! $this->uploadsReady || count($this->uploadedFiles) !== count($this->dataSources)) {
+            $this->addError('files', __('Debes cargar todos los insumos requeridos antes de generar el trabajo.'));
+            $this->broadcastFormState();
+
+            return;
+        }
 
         $formData = new CreateRunFormDataDto(
             collectionNoticeTypeId: (int) $this->typeId,
@@ -466,12 +317,8 @@ class CreateRunModal extends Component implements CollectionRunFormContext
     {
         $files = [];
 
-        foreach ($this->files as $key => $file) {
+        foreach ($this->uploadedFiles as $key => $file) {
             if (! is_array($file)) {
-                continue;
-            }
-
-            if (($this->uploadingSources[$key] ?? false) || ($this->staleUploads[$key] ?? false)) {
                 continue;
             }
 
@@ -528,18 +375,6 @@ class CreateRunModal extends Component implements CollectionRunFormContext
         return self::MAX_FILE_SIZE_KB * 1024;
     }
 
-    public function resetUploadedFile(int $dataSourceId): void
-    {
-        $key = (string) $dataSourceId;
-
-        unset($this->files[$key]);
-        unset($this->uploadingSources[$key], $this->staleUploads[$key]);
-
-        $this->resetValidation(['files.' . $key]);
-
-        $this->broadcastFormState();
-    }
-
     public function logChunkEvent(string $event, int $dataSourceId, array $context = []): void
     {
         Log::info(
@@ -563,55 +398,66 @@ class CreateRunModal extends Component implements CollectionRunFormContext
         $this->dispatch('collection-run-form-state-changed', isValid: $isValid);
     }
 
-    public function getFormDataSources(): array
-    {
-        return $this->dataSources;
-    }
-
-    public function persistUploadedFile(int $dataSourceId, CollectionRunUploadedFileDto $file): void
-    {
-        $key = (string) $dataSourceId;
-
-        $this->files[$key] = $file->toArray();
-        unset($this->uploadingSources[$key], $this->staleUploads[$key]);
-
-        $this->resetValidation(['files.' . $dataSourceId]);
-
-        $this->broadcastFormState();
-    }
-
-    public function registerFileError(int $dataSourceId, string $message): void
-    {
-        $this->addError('files.' . $dataSourceId, $message);
-        unset($this->uploadingSources[(string) $dataSourceId], $this->staleUploads[(string) $dataSourceId]);
-
-        $this->broadcastFormState();
-    }
-
-    public function markFileUploadInProgress(int $dataSourceId): void
-    {
-        $key = (string) $dataSourceId;
-
-        $this->uploadingSources[$key] = true;
-        $this->staleUploads[$key] = true;
-
-        $this->resetValidation(['files.' . $key]);
-
-        $this->broadcastFormState();
-    }
-
-    public function clearFileUploadState(int $dataSourceId): void
-    {
-        $key = (string) $dataSourceId;
-
-        unset($this->uploadingSources[$key], $this->staleUploads[$key]);
-
-        $this->broadcastFormState();
-    }
-
     public function preventRender(): void
     {
         $this->skipRender();
     }
 
+    /**
+     * @param array<int, mixed> $files
+     * @return array<int, array{path:string, original_name:string, size:int, mime:?string, extension:?string|null}>
+     */
+    private function sanitizeUploadedFilesPayload(array $files): array
+    {
+        $sanitized = [];
+
+        $allowedIds = \collect($this->dataSources)
+            ->map(fn (array $source): int => (int) ($source['id'] ?? 0))
+            ->filter(fn (int $id): bool => $id > 0)
+            ->values()
+            ->all();
+
+        foreach ($files as $key => $file) {
+            if (! is_array($file)) {
+                continue;
+            }
+
+            $identifier = (int) $key;
+
+            if (! in_array($identifier, $allowedIds, true)) {
+                continue;
+            }
+
+            $path = isset($file['path']) && is_string($file['path']) ? trim($file['path']) : '';
+            $name = isset($file['original_name']) && is_string($file['original_name']) ? trim($file['original_name']) : '';
+            $size = isset($file['size']) ? (int) $file['size'] : 0;
+
+            if ($path === '' || $name === '' || $size <= 0) {
+                continue;
+            }
+
+            if (str_contains($path, '..') || ! str_starts_with($path, 'completed/')) {
+                continue;
+            }
+
+            $mime = isset($file['mime']) && is_string($file['mime']) && $file['mime'] !== ''
+                ? $file['mime']
+                : null;
+
+            $extension = isset($file['extension']) && is_string($file['extension']) && $file['extension'] !== ''
+                ? strtolower($file['extension'])
+                : null;
+
+            $sanitized[$identifier] = [
+                'path' => $path,
+                'original_name' => $name,
+                'size' => $size,
+                'mime' => $mime,
+                'extension' => $extension,
+            ];
+        }
+
+        return $sanitized;
+    }
 }
+
