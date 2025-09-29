@@ -33,6 +33,8 @@ class CreateRunModal extends Component
 
     public string $periodValue = '';
 
+    public bool $formReady = false;
+
     /**
      * @var array<int, array{id:int, name:string}>
      */
@@ -81,6 +83,8 @@ class CreateRunModal extends Component
             ->orderBy('name')
             ->get(['id', 'name'])
             ->toArray();
+
+        $this->broadcastFormValidity();
     }
 
     public function updatedTypeId($value): void
@@ -895,7 +899,13 @@ class CreateRunModal extends Component
 
     private function broadcastFormValidity(): void
     {
-        $this->dispatch('collection-run-form-state-changed', isValid: $this->isFormValid);
+        $this->formReady = $this->isFormValid;
+
+        $this->dispatch('collection-run-form-state-changed', isValid: $this->formReady);
+
+        $this->dispatchBrowserEvent('collection-run-form-state-changed', [
+            'isValid' => $this->formReady,
+        ]);
     }
 
     /**

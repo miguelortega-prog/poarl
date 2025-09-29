@@ -5,17 +5,20 @@
         </x-slot>
 
         <x-slot name="content">
-            <form wire:submit.prevent="submit" id="create-run-form" class="space-y-8">
-                <div class="grid grid-cols-2 gap-6">
-                    <div class="flex flex-col gap-3">
-                        <x-label for="collection_notice_type_id" value="{{ __('Tipo de comunicado') }}" />
+            <form wire:submit.prevent="submit" id="create-run-form" class="relative space-y-8">
+                <div
+                    class="sticky top-0 z-20 -mx-6 -mt-4 border-b border-gray-200 bg-white/95 px-6 pb-6 pt-4 shadow-sm backdrop-blur dark:border-gray-700 dark:bg-gray-900/95"
+                >
+                    <div class="grid grid-cols-1 gap-6 desktop:grid-cols-2">
+                        <div class="flex flex-col gap-3">
+                            <x-label for="collection_notice_type_id" value="{{ __('Tipo de comunicado') }}" />
 
-                        <select
-                            id="collection_notice_type_id"
-                            name="collection_notice_type_id"
-                            wire:model.live="typeId"
-                            class="block w-full rounded-3xl border border-gray-300 bg-white px-4 py-3 text-sm text-gray-700 shadow-sm transition focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
-                        >
+                            <select
+                                id="collection_notice_type_id"
+                                name="collection_notice_type_id"
+                                wire:model.live="typeId"
+                                class="block w-full rounded-3xl border border-gray-300 bg-white px-4 py-3 text-sm text-gray-700 shadow-sm transition focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+                            >
                             <option value="">{{ __('Selecciona un tipo de comunicado') }}</option>
                             @foreach ($types as $type)
                                 <option value="{{ $type['id'] }}">{{ $type['name'] }}</option>
@@ -49,6 +52,7 @@
                                 </p>
                             @enderror
                         @endif
+                    </div>
                     </div>
                 </div>
 
@@ -184,7 +188,8 @@
             <div
                 class="flex w-full justify-end gap-3"
                 x-data="{ canSubmit: @js($isFormValid) }"
-                x-on:collection-run-form-state-changed.window="canSubmit = Boolean($event.detail?.isValid)"
+                x-effect="canSubmit = Boolean($wire.get('formReady'))"
+                x-on:collection-run-form-state-changed.window="canSubmit = Boolean($event.detail?.isValid ?? canSubmit)"
             >
                 <button
                     type="button"
