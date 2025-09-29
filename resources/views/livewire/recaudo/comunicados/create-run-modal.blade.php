@@ -110,7 +110,7 @@
                                                 })"
                                                 x-init="(() => { init(); $el.addEventListener('alpine:destroy', () => destroy(), { once: true }); })()"
                                                 :class="{ 'opacity-60': isUploading }"
-                                                wire:ignore.self
+                                                wire:ignore
                                             >
                                                 <!-- Botón seleccionar -->
                                                 <label
