@@ -95,6 +95,8 @@ class CreateRunModal extends Component
         $this->periodValue = '';
 
         if (! filled($value)) {
+            $this->broadcastFormValidity();
+
             return;
         }
 
@@ -136,6 +138,8 @@ class CreateRunModal extends Component
             $this->periodReadonly = false;
             $this->periodValue = '';
         }
+
+        $this->broadcastFormValidity();
     }
 
     public function getIsFormValidProperty(): bool
@@ -171,6 +175,7 @@ class CreateRunModal extends Component
         if (! $value) {
             $this->reset(['typeId', 'dataSources', 'files', 'periodMode', 'period', 'periodReadonly', 'periodValue']);
             $this->resetValidation();
+            $this->broadcastFormValidity();
         }
     }
 
@@ -178,6 +183,7 @@ class CreateRunModal extends Component
     {
         if ($propertyName === 'typeId') {
             $this->validateOnly('typeId');
+            $this->broadcastFormValidity();
 
             return;
         }
@@ -185,13 +191,19 @@ class CreateRunModal extends Component
         if ($propertyName === 'period' && $this->periodMode === 'write') {
             $this->periodValue = $this->period;
             $this->validateOnly('period');
+            $this->broadcastFormValidity();
 
             return;
         }
 
         if (str_starts_with($propertyName, 'files.')) {
             $this->validateOnly($propertyName);
+            $this->broadcastFormValidity();
+
+            return;
         }
+
+        $this->broadcastFormValidity();
     }
 
     #[On('collection-run::chunkUploading')]
@@ -211,6 +223,16 @@ class CreateRunModal extends Component
     {
         if ($dataSourceId <= 0) {
             $this->skipRender();
+            return;
+        }
+
+        $normalizedChunkUpload = $this->normalizeChunkUploadedFile($file);
+
+        if ($normalizedChunkUpload !== null) {
+            $this->storeUploadedFileMetadata($dataSourceId, $normalizedChunkUpload);
+
+            $this->skipRender();
+
             return;
         }
 
@@ -360,19 +382,13 @@ class CreateRunModal extends Component
             return;
         }
 
-        $path = (string) ($file['path'] ?? '');
+        $normalized = $this->normalizeChunkUploadedFile($file);
 
-        if ($path === '') {
+        if ($normalized === null) {
             return;
         }
 
-        $this->storeUploadedFileMetadata($dataSourceId, [
-            'path' => $path,
-            'original_name' => (string) ($file['original_name'] ?? ''),
-            'size' => isset($file['size']) ? (int) $file['size'] : 0,
-            'mime' => $file['mime'] ?? null,
-            'extension' => $file['extension'] ?? null,
-        ]);
+        $this->storeUploadedFileMetadata($dataSourceId, $normalized);
     }
 
     #[On('openCreateRunModal')]
@@ -381,12 +397,14 @@ class CreateRunModal extends Component
         $this->reset(['typeId', 'dataSources', 'files', 'periodMode', 'period', 'periodReadonly', 'periodValue']);
         $this->resetValidation();
         $this->open = true;
+        $this->broadcastFormValidity();
     }
 
     public function cancel(): void
     {
         $this->reset(['open', 'typeId', 'dataSources', 'files', 'periodMode', 'period', 'periodReadonly', 'periodValue']);
         $this->resetValidation();
+        $this->broadcastFormValidity();
     }
 
     public function submit(): void
@@ -535,6 +553,8 @@ class CreateRunModal extends Component
         unset($this->files[$key]);
 
         $this->resetValidation(['files.' . $key]);
+
+        $this->broadcastFormValidity();
     }
 
     protected function logChunkActivity(string $event, int $dataSourceId, array $context = []): void
@@ -556,5 +576,47 @@ class CreateRunModal extends Component
         $this->files[(string) $dataSourceId] = $file;
 
         $this->resetValidation(['files.' . $dataSourceId]);
+
+        $this->broadcastFormValidity();
+    }
+
+    private function broadcastFormValidity(): void
+    {
+        $this->dispatch('collection-run-form-state-changed', isValid: $this->isFormValid);
+    }
+
+    /**
+     * @param array<string, mixed> $file
+     *
+     * @return array{path: string, original_name: string, size: int, mime: string|null, extension: string|null}|null
+     */
+    private function normalizeChunkUploadedFile(array $file): ?array
+    {
+        $path = isset($file['path']) ? (string) $file['path'] : '';
+        $originalName = isset($file['original_name']) ? (string) $file['original_name'] : '';
+        $size = isset($file['size']) ? (int) $file['size'] : 0;
+
+        if ($path !== '' && $size <= 0 && Storage::disk('collection_temp')->exists($path)) {
+            $size = (int) Storage::disk('collection_temp')->size($path);
+        }
+
+        if ($path === '' || $originalName === '' || $size <= 0) {
+            return null;
+        }
+
+        $mime = isset($file['mime']) && is_string($file['mime']) ? $file['mime'] : null;
+        $extension = isset($file['extension']) && is_string($file['extension']) ? strtolower($file['extension']) : null;
+
+        if ($extension !== null && $extension === '') {
+            $extension = null;
+        }
+
+        return [
+            'path' => $path,
+            'original_name' => $originalName,
+            'size' => $size,
+            'mime' => $mime,
+            'extension' => $extension,
+        ];
     }
 }
