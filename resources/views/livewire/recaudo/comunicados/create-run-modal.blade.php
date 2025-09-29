@@ -189,7 +189,7 @@
                 class="flex w-full justify-end gap-3"
                 x-data="{ canSubmit: @js($isFormValid) }"
                 x-effect="canSubmit = Boolean($wire.get('formReady'))"
-                x-on:collection-run-form-state-changed.window="canSubmit = Boolean($event.detail?.isValid ?? canSubmit)"
+                x-init="Livewire.on('collection-run-form-state-changed', ({ isValid } = {}) => { canSubmit = Boolean(isValid ?? canSubmit) })"
             >
                 <button
                     type="button"
