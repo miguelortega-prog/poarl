@@ -41,6 +41,7 @@ class ChunkedUploadSession {
         this.currentController = null;
         this.aborted = false;
         this.httpClient = resolveHttpClient();
+        this.sendCredentials = shouldSendCredentials(this.uploadUrl);
     }
 
     async start() {
@@ -115,23 +116,12 @@ class ChunkedUploadSession {
         this.currentController = controller;
 
         try {
-            const response = await this.httpClient.post(this.uploadUrl, formData, {
-                signal: controller.signal,
-                withCredentials: true,
-                headers: this.csrfToken
-                    ? { 'X-CSRF-TOKEN': this.csrfToken }
-                    : undefined,
-                onUploadProgress: (event) => {
-                    if (!this.onProgress) {
-                        return;
-                    }
-
-                    const loaded = Number.isFinite(event.loaded) ? event.loaded : safeChunkSize;
-                    const currentBytes = Math.min(previousBytes + loaded, totalBytes);
-                    const progress = Math.min((currentBytes / totalBytes) * 100, 100);
-
-                    this.onProgress(progress);
-                },
+            const response = await this.dispatchChunkRequest({
+                controller,
+                formData,
+                previousBytes,
+                safeChunkSize,
+                totalBytes,
             });
 
             if (this.onProgress) {
@@ -140,7 +130,7 @@ class ChunkedUploadSession {
                 this.onProgress(finalProgress);
             }
 
-            return response?.data ?? {};
+            return response;
         } catch (error) {
             if (controller.signal.aborted || isAxiosCancellation(error)) {
                 throw new UploadAbortedError();
@@ -152,6 +142,90 @@ class ChunkedUploadSession {
                 this.currentController = null;
             }
         }
+    }
+
+    async dispatchChunkRequest({ controller, formData, previousBytes, safeChunkSize, totalBytes }) {
+        if (supportsFetchUploads()) {
+            return this.sendChunkWithFetch({ controller, formData });
+        }
+
+        return this.sendChunkWithAxios({ controller, formData, previousBytes, safeChunkSize, totalBytes });
+    }
+
+    async sendChunkWithFetch({ controller, formData }) {
+        const headers = this.csrfToken
+            ? { 'X-CSRF-TOKEN': this.csrfToken }
+            : {};
+
+        const credentialsMode = this.sendCredentials ? 'include' : 'omit';
+
+        const response = await window.fetch(this.uploadUrl, {
+            method: 'POST',
+            body: formData,
+            signal: controller.signal,
+            credentials: credentialsMode,
+            headers,
+            redirect: 'follow',
+        });
+
+        if (!response.ok) {
+            throw new Error(await extractResponseErrorMessage(response));
+        }
+
+        return parseJsonResponse(await response.text());
+    }
+
+    async sendChunkWithAxios({ controller, formData, previousBytes, safeChunkSize, totalBytes }) {
+        const response = await this.httpClient.post(this.uploadUrl, formData, {
+            signal: controller.signal,
+            withCredentials: this.sendCredentials,
+            headers: this.csrfToken
+                ? { 'X-CSRF-TOKEN': this.csrfToken }
+                : undefined,
+            onUploadProgress: (event) => {
+                if (!this.onProgress) {
+                    return;
+                }
+
+                const loaded = Number.isFinite(event.loaded) ? event.loaded : safeChunkSize;
+                const currentBytes = Math.min(previousBytes + loaded, totalBytes);
+                const progress = Math.min((currentBytes / totalBytes) * 100, 100);
+
+                this.onProgress(progress);
+            },
+        });
+
+        return response?.data ?? {};
+    }
+}
+
+function supportsFetchUploads() {
+    return typeof window !== 'undefined'
+        && typeof window.fetch === 'function'
+        && typeof FormData !== 'undefined';
+}
+
+function shouldSendCredentials(uploadUrl) {
+    if (typeof window === 'undefined') {
+        return true;
+    }
+
+    const globalOverride = window.POARL_CHUNK_UPLOADS_WITH_CREDENTIALS;
+
+    if (typeof globalOverride === 'boolean') {
+        return globalOverride;
+    }
+
+    if (typeof uploadUrl !== 'string' || uploadUrl.trim() === '') {
+        return true;
+    }
+
+    try {
+        const resolvedUrl = new URL(uploadUrl, window.location.origin);
+        return resolvedUrl.origin === window.location.origin;
+    } catch (error) {
+        console.warn('No fue posible resolver el origen del endpoint de carga.', error);
+        return true;
     }
 }
 
@@ -172,6 +246,7 @@ export function collectionRunUploader(options) {
         uploadId: null,
         wireWatcherStop: null,
         currentSession: null,
+        maxFileSize: sanitized.maxFileSize,
 
         init() {
             configureLivewireChunkSize(this.chunkSize);
@@ -208,8 +283,8 @@ export function collectionRunUploader(options) {
             this.isUploading = true;
             this.uploadId = generateUploadId();
 
-            //this.dispatchLivewireEvent('collection-run::chunkUploading', { dataSourceId: this.dataSourceId });
-            //this.dispatchLivewireEvent('chunk-uploading', { dataSourceId: this.dataSourceId });
+            this.dispatchLifecycle('collection-run::chunkUploading', { status: 'uploading' });
+            this.dispatchLifecycle('chunk-uploading', { status: 'uploading' });
 
             try {
                 const session = new ChunkedUploadSession({
@@ -249,11 +324,23 @@ export function collectionRunUploader(options) {
                     this.progress = 0;
                     this.errorMessage = '';
                     this.fileData = null;
+
+                    this.dispatchLifecycle('collection-run::chunkUploadCancelled', { status: 'cancelled' });
+                    this.dispatchLifecycle('chunk-upload-cancelled', { status: 'cancelled' });
                 } else {
                     this.status = 'error';
                     this.progress = 0;
                     this.errorMessage = extractErrorMessage(error);
                     this.fileData = null;
+
+                    this.dispatchLifecycle('collection-run::chunkFailed', {
+                        status: 'failed',
+                        message: this.errorMessage,
+                    });
+                    this.dispatchLifecycle('chunk-upload-failed', {
+                        status: 'failed',
+                        message: this.errorMessage,
+                    });
                 }
             } finally {
                 this.isUploading = false;
@@ -262,15 +349,38 @@ export function collectionRunUploader(options) {
         },
 
         progressLabel() {
-            if (this.isUploading || this.status === 'completed') {
-                return `${Math.round(this.progress)}%`;
+            if (this.isUploading) {
+                const summary = this.fileSummary();
+                const percentage = `${Math.round(this.progress)}%`;
+
+                return summary ? `${percentage} · ${summary}` : percentage;
+            }
+
+            if (this.status === 'completed') {
+                return this.fileSummary();
             }
 
             if (this.fileSize > 0) {
-                return humanFileSize(this.fileSize);
+                return this.fileSummary();
             }
 
             return '';
+        },
+
+        fileSummary() {
+            const fileLabel = humanFileSize(this.fileSize);
+
+            if (this.maxFileSize > 0) {
+                const maxLabel = humanFileSize(this.maxFileSize);
+
+                if (fileLabel) {
+                    return `${fileLabel} / ${maxLabel}`;
+                }
+
+                return `0 B / ${maxLabel}`;
+            }
+
+            return fileLabel;
         },
 
         applyUploadedFile(file) {
@@ -315,6 +425,30 @@ export function collectionRunUploader(options) {
             }
 
             this.isUploading = false;
+        },
+
+        cancelUpload() {
+            if (this.isUploading) {
+                this.cancelOngoingUpload();
+
+                return;
+            }
+
+            if (this.status === 'completed') {
+                const filePath = this.fileData?.path ?? null;
+
+                this.clearUploadedFile();
+
+                this.dispatchLifecycle('collection-run::chunkUploadCleared', {
+                    status: 'cleared',
+                    filePath,
+                });
+
+                this.dispatchLifecycle('chunk-upload-cleared', {
+                    status: 'cleared',
+                    filePath,
+                });
+            }
         },
 
         resetInputValue(input) {
@@ -375,6 +509,13 @@ export function collectionRunUploader(options) {
                 Livewire.dispatch(eventName, payload);
             }
         },
+
+        dispatchLifecycle(eventName, payload = {}) {
+            this.dispatchLivewireEvent(eventName, {
+                dataSourceId: this.dataSourceId,
+                ...payload,
+            });
+        },
     };
 }
 
@@ -382,12 +523,14 @@ function normalizeOptions(options) {
     const dataSourceId = Number.isFinite(options?.dataSourceId) ? Number(options.dataSourceId) : 0;
     const uploadUrl = typeof options?.uploadUrl === 'string' ? options.uploadUrl : '';
     const initialFile = normalizeUploadedFile(options?.initialFile ?? null);
+    const maxFileSize = Number.isFinite(options?.maxFileSize) ? Number(options.maxFileSize) : 0;
 
     return {
         dataSourceId,
         uploadUrl,
         initialFile,
         chunkSize: resolveChunkSize(options?.chunkSize),
+        maxFileSize: maxFileSize > 0 ? maxFileSize : 0,
     };
 }
 
@@ -425,6 +568,40 @@ function normalizeAxiosError(error) {
     return new Error('No fue posible cargar el archivo. Intenta de nuevo.');
 }
 
+async function extractResponseErrorMessage(response) {
+    try {
+        const clone = response.clone();
+        const data = await clone.json();
+
+        if (data && typeof data.message === 'string' && data.message.trim() !== '') {
+            return data.message;
+        }
+    } catch (error) {
+        // Ignorar errores de parseo y continuar con el texto plano.
+    }
+
+    const text = await response.text();
+
+    if (typeof text === 'string' && text.trim() !== '') {
+        return text;
+    }
+
+    return 'No fue posible cargar el archivo. Intenta de nuevo.';
+}
+
+function parseJsonResponse(payload) {
+    if (typeof payload !== 'string' || payload.trim() === '') {
+        return {};
+    }
+
+    try {
+        return JSON.parse(payload);
+    } catch (error) {
+        console.warn('La respuesta del servidor no es un JSON válido.', error);
+        return {};
+    }
+}
+
 function extractErrorMessage(error) {
     if (error?.response?.data?.message) {
         return String(error.response.data.message);
@@ -439,7 +616,7 @@ function extractErrorMessage(error) {
 
 function humanFileSize(bytes) {
     if (!Number.isFinite(bytes) || bytes <= 0) {
-        return '';
+        return '0 B';
     }
 
     const units = ['B', 'KB', 'MB', 'GB', 'TB'];

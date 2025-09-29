@@ -11,11 +11,25 @@ use RuntimeException;
 
 class ChunkedUploadManager
 {
-    private const PENDING_DIRECTORY = 'pending';
-    private const COMPLETED_DIRECTORY = 'completed';
+    public const PENDING_DIRECTORY = 'pending';
+    public const COMPLETED_DIRECTORY = 'completed';
+
+    private int $maxFileSizeBytes;
+
+    private int $maxChunkSizeBytes;
 
     public function __construct(private readonly FilesystemFactory $filesystem)
     {
+        $configuredMaxFileSize = (int) config('chunked-uploads.collection_notices.max_file_size');
+        $configuredChunkSize = (int) config('chunked-uploads.collection_notices.chunk_size');
+
+        $this->maxFileSizeBytes = $configuredMaxFileSize > 0
+            ? $configuredMaxFileSize
+            : 512 * 1024 * 1024;
+
+        $this->maxChunkSizeBytes = $configuredChunkSize > 0
+            ? $configuredChunkSize
+            : 2 * 1024 * 1024;
     }
 
     /**
@@ -27,8 +41,16 @@ class ChunkedUploadManager
     {
         $disk = $this->getDisk();
 
-        if ($uploadId === '' || $totalChunks <= 0 || $chunkIndex < 0 || $chunkIndex >= $totalChunks) {
+        $this->assertValidUploadId($uploadId);
+
+        if ($totalChunks <= 0 || $chunkIndex < 0 || $chunkIndex >= $totalChunks) {
             throw new RuntimeException('Los datos del chunk recibido son inválidos.');
+        }
+
+        $this->assertChunkSizeIsAllowed($chunk);
+
+        if (isset($metadata['size']) && (int) $metadata['size'] > $this->maxFileSizeBytes) {
+            throw new RuntimeException('El archivo excede el tamaño máximo permitido.');
         }
 
         $basePath = $this->buildPendingPath($uploadId);
@@ -81,20 +103,24 @@ class ChunkedUploadManager
 
         sort($chunkFiles);
 
-        foreach ($chunkFiles as $chunkPath) {
-            $sourceHandle = fopen($disk->path($chunkPath), 'rb');
+        try {
+            foreach ($chunkFiles as $chunkPath) {
+                $sourceHandle = fopen($disk->path($chunkPath), 'rb');
 
-            if ($sourceHandle === false) {
-                fclose($targetHandle);
-                throw new RuntimeException('No fue posible leer un fragmento del archivo para completarlo.');
+                if ($sourceHandle === false) {
+                    throw new RuntimeException('No fue posible leer un fragmento del archivo para completarlo.');
+                }
+
+                try {
+                    stream_copy_to_stream($sourceHandle, $targetHandle);
+                } finally {
+                    fclose($sourceHandle);
+                }
             }
-
-            stream_copy_to_stream($sourceHandle, $targetHandle);
-            fclose($sourceHandle);
+        } finally {
+            fflush($targetHandle);
+            fclose($targetHandle);
         }
-
-        fflush($targetHandle);
-        fclose($targetHandle);
 
         foreach ($chunkFiles as $chunkPath) {
             $disk->delete($chunkPath);
@@ -108,11 +134,18 @@ class ChunkedUploadManager
             $size = (int) $disk->size($targetPath);
         }
 
+        if ($size > $this->maxFileSizeBytes) {
+            $disk->delete($targetPath);
+            throw new RuntimeException('El archivo excede el tamaño máximo permitido.');
+        }
+
+        $detectedMime = $this->detectMimeType($absoluteTarget);
+
         return [
             'path' => $targetPath,
             'original_name' => $originalName,
             'size' => (int) $size,
-            'mime' => $metadata['mime'] ?? null,
+            'mime' => $detectedMime ?? ($metadata['mime'] ?? null),
             'extension' => $extension ? strtolower($extension) : null,
         ];
     }
@@ -200,5 +233,48 @@ class ChunkedUploadManager
         }
 
         $disk->makeDirectory($path);
+    }
+
+    private function assertValidUploadId(string $uploadId): void
+    {
+        if ($uploadId === '' || ! preg_match('/^[a-zA-Z0-9_-]{10,191}$/', $uploadId)) {
+            throw new RuntimeException('El identificador de carga es inválido.');
+        }
+    }
+
+    private function assertChunkSizeIsAllowed(UploadedFile $chunk): void
+    {
+        $size = $chunk->getSize();
+
+        if (! $size || $size <= 0) {
+            $size = filesize($chunk->getPathname());
+        }
+
+        if (! $size || $size <= 0) {
+            throw new RuntimeException('El fragmento de archivo recibido está vacío.');
+        }
+
+        if ($size > $this->maxChunkSizeBytes) {
+            throw new RuntimeException('El fragmento de archivo excede el tamaño permitido.');
+        }
+    }
+
+    private function detectMimeType(string $absolutePath): ?string
+    {
+        if (! is_file($absolutePath)) {
+            return null;
+        }
+
+        try {
+            $mime = mime_content_type($absolutePath);
+        } catch (\Throwable) {
+            return null;
+        }
+
+        if (! is_string($mime) || $mime === '') {
+            return null;
+        }
+
+        return strtolower($mime);
     }
 }

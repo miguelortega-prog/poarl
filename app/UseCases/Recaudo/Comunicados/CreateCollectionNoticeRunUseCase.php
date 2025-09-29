@@ -8,6 +8,7 @@ use App\DTOs\Recaudo\Comunicados\CreateCollectionNoticeRunDto;
 use App\DTOs\Recaudo\Comunicados\RunStoredFileDto;
 use App\Models\CollectionNoticeType;
 use App\Models\CollectionNoticeRun;
+use App\Services\Uploads\ChunkedUploadCleaner;
 use Illuminate\Contracts\Filesystem\Factory as FilesystemFactory;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Support\Str;
@@ -21,6 +22,7 @@ final class CreateCollectionNoticeRunUseCase
         private readonly CollectionNoticeRunFileRepositoryInterface $fileRepo,
         private readonly DatabaseManager $db,
         private readonly FilesystemFactory $filesystem,
+        private readonly ChunkedUploadCleaner $uploadCleaner,
     ) {}
 
     /**
@@ -100,17 +102,17 @@ final class CreateCollectionNoticeRunUseCase
                     fclose($readStream);
                 }
 
+                $size = isset($file['size']) ? (int) $file['size'] : 0;
+                if ($size <= 0) {
+                    $size = (int) $tempDisk->size($tempPath);
+                }
+
                 $storedPaths[] = [$diskName, $relativePath];
 
                 $tempDisk->delete($tempPath);
                 $tempDirectory = trim(dirname($tempPath), '/');
                 if ($tempDirectory !== '') {
                     $tempDisk->deleteDirectory($tempDirectory);
-                }
-
-                $size = isset($file['size']) ? (int) $file['size'] : 0;
-                if ($size <= 0) {
-                    $size = (int) $tempDisk->size($tempPath);
                 }
 
                 $this->fileRepo->create(
@@ -140,6 +142,12 @@ final class CreateCollectionNoticeRunUseCase
             }
 
             throw $e;
+        }
+
+        $ttlMinutes = (int) config('chunked-uploads.collection_notices.cleanup_ttl_minutes');
+
+        if ($ttlMinutes > 0) {
+            $this->uploadCleaner->purgeExpired($ttlMinutes);
         }
     }
 }
