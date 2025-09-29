@@ -210,6 +210,7 @@ class CreateRunModal extends Component
     public function handleCollectionRunChunkUploaded(int $dataSourceId, array $file): void
     {
         if ($dataSourceId <= 0) {
+            $this->skipRender();
             return;
         }
 
@@ -226,6 +227,7 @@ class CreateRunModal extends Component
 
             report($exception);
 
+            $this->skipRender();
             return;
         }
 
@@ -234,6 +236,7 @@ class CreateRunModal extends Component
                 'payload_keys' => array_keys($file),
             ]);
 
+            $this->skipRender();
             return;
         }
 
@@ -249,16 +252,22 @@ class CreateRunModal extends Component
 
             report($exception);
 
+            $this->skipRender();
             return;
         }
 
+        // Guarda metadata para validación/backoffice
         $this->storeUploadedFileMetadata($dataSourceId, $normalized);
 
         $this->logChunkActivity('uploaded', $dataSourceId, [
             'temporary_filename' => $uploadedFile->getFilename(),
-            'filesize' => $uploadedFile->getSize(),
+            'filesize'           => $uploadedFile->getSize(),
         ]);
+
+        $this->skipRender();
     }
+
+
 
     protected function rules(): array
     {

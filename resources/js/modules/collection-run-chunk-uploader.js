@@ -208,8 +208,8 @@ export function collectionRunUploader(options) {
             this.isUploading = true;
             this.uploadId = generateUploadId();
 
-            this.dispatchLivewireEvent('collection-run::chunkUploading', { dataSourceId: this.dataSourceId });
-            this.dispatchLivewireEvent('chunk-uploading', { dataSourceId: this.dataSourceId });
+            //this.dispatchLivewireEvent('collection-run::chunkUploading', { dataSourceId: this.dataSourceId });
+            //this.dispatchLivewireEvent('chunk-uploading', { dataSourceId: this.dataSourceId });
 
             try {
                 const session = new ChunkedUploadSession({
