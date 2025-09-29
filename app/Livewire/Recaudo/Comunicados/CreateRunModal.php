@@ -261,6 +261,18 @@ class CreateRunModal extends Component implements CollectionRunFormContext
             return;
         }
 
+        if (
+            $propertyName === 'formReady'
+            || $propertyName === 'uploadingSources'
+            || $propertyName === 'staleUploads'
+            || str_starts_with($propertyName, 'uploadingSources.')
+            || str_starts_with($propertyName, 'staleUploads.')
+        ) {
+            $this->skipRender();
+
+            return;
+        }
+
         $this->broadcastFormState();
     }
 
@@ -542,9 +554,13 @@ class CreateRunModal extends Component implements CollectionRunFormContext
 
     public function broadcastFormState(): void
     {
-        $this->formReady = $this->isFormValid;
+        $isValid = $this->isFormValid;
 
-        $this->dispatch('collection-run-form-state-changed', isValid: $this->formReady);
+        if ($this->formReady !== $isValid) {
+            $this->formReady = $isValid;
+        }
+
+        $this->dispatch('collection-run-form-state-changed', isValid: $isValid);
     }
 
     public function getFormDataSources(): array

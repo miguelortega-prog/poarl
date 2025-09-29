@@ -21,9 +21,10 @@ final class CollectionRunChunkManager
             return;
         }
 
+        $form->preventRender();
+
         $form->markFileUploadInProgress($dataSourceId);
         $form->logChunkEvent('uploading', $dataSourceId, $this->buildPayloadContext($payload));
-        $form->preventRender();
     }
 
     public function handleUploaded(CollectionRunFormContext $form, mixed ...$arguments): void
