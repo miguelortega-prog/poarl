@@ -244,7 +244,6 @@ export function collectionRunUploader(options) {
         errorMessage: '',
         isUploading: false,
         uploadId: null,
-        wireWatcherStop: null,
         currentSession: null,
         maxFileSize: sanitized.maxFileSize,
 
@@ -255,11 +254,10 @@ export function collectionRunUploader(options) {
                 this.applyUploadedFile(this.fileData);
             }
 
-            this.registerWireWatcher();
+            // No registramos watcher - usamos eventos del DOM solamente
         },
 
         destroy() {
-            this.stopWireWatcher();
             this.cancelOngoingUpload();
         },
 
@@ -309,12 +307,10 @@ export function collectionRunUploader(options) {
 
                 this.applyUploadedFile(uploadedFile);
 
-                this.dispatchLivewireEvent('collection-run::chunkUploaded', {
-                    dataSourceId: this.dataSourceId,
-                    file: uploadedFile,
-                });
-
-                this.dispatchLivewireEvent('chunk-uploaded', {
+                // CAMBIO CRÍTICO: Enviamos evento 'chunkStored' en lugar de 'chunkUploaded'
+                // para indicar que el archivo está LISTO para ser almacenado en Livewire
+                // Esto previene re-renderizado durante la carga de chunks
+                this.dispatchLivewireEvent('collection-run::chunkStored', {
                     dataSourceId: this.dataSourceId,
                     file: uploadedFile,
                 });
@@ -400,6 +396,9 @@ export function collectionRunUploader(options) {
 
         clearUploadedFile() {
             this.cancelOngoingUpload();
+
+            const filePath = this.fileData?.path ?? null;
+
             this.fileData = null;
             this.fileName = '';
             this.fileSize = 0;
@@ -407,6 +406,12 @@ export function collectionRunUploader(options) {
             this.status = 'idle';
             this.errorMessage = '';
             this.uploadId = null;
+
+            // Notificar a Livewire que limpiamos el archivo
+            this.dispatchLifecycle('collection-run::chunkCleared', {
+                status: 'cleared',
+                filePath,
+            });
         },
 
         updateProgress(value) {
@@ -435,70 +440,13 @@ export function collectionRunUploader(options) {
             }
 
             if (this.status === 'completed') {
-                const filePath = this.fileData?.path ?? null;
-
                 this.clearUploadedFile();
-
-                this.dispatchLifecycle('collection-run::chunkUploadCleared', {
-                    status: 'cleared',
-                    filePath,
-                });
-
-                this.dispatchLifecycle('chunk-upload-cleared', {
-                    status: 'cleared',
-                    filePath,
-                });
             }
         },
 
         resetInputValue(input) {
             if (input instanceof HTMLInputElement) {
                 input.value = '';
-            }
-        },
-
-        registerWireWatcher() {
-            if (this.wireWatcherStop || typeof this.$watch !== 'function') {
-                return;
-            }
-
-            if (!this.$wire || typeof this.$wire.get !== 'function') {
-                window.requestAnimationFrame(() => {
-                    this.registerWireWatcher();
-                });
-
-                return;
-            }
-
-            this.wireWatcherStop = this.$watch(
-                () => {
-                    try {
-                        return this.$wire.get(`files.${this.dataSourceId}`);
-                    } catch (error) {
-                        console.error('No fue posible leer el archivo desde Livewire.', error);
-                        return null;
-                    }
-                },
-                (value) => {
-                    if (this.isUploading) {
-                        return;
-                    }
-
-                    const normalized = normalizeUploadedFile(value);
-
-                    if (normalized) {
-                        this.applyUploadedFile(normalized);
-                    } else if (this.status === 'completed') {
-                        this.clearUploadedFile();
-                    }
-                },
-            );
-        },
-
-        stopWireWatcher() {
-            if (typeof this.wireWatcherStop === 'function') {
-                this.wireWatcherStop();
-                this.wireWatcherStop = null;
             }
         },
 
