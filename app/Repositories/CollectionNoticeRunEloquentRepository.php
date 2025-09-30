@@ -18,7 +18,7 @@ final class CollectionNoticeRunEloquentRepository implements CollectionNoticeRun
             'collection_notice_type_id' => $dto->collectionNoticeTypeId,
             'period_value'              => $dto->periodValue,
             'requested_by_id'           => $dto->requestedById,
-            'status'                    => CollectionNoticeRunStatus::READY->value,
+            'status'                    => CollectionNoticeRunStatus::PENDING->value,
         ]);
     }
 

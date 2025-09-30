@@ -29,8 +29,11 @@ final class DeleteCollectionNoticeRunUseCase
             throw (new ModelNotFoundException())->setModel(CollectionNoticeRun::class, [$dto->runId]);
         }
 
-        if ($run->status !== CollectionNoticeRunStatus::READY->value) {
-            throw new RuntimeException(__('Solo puedes eliminar comunicados en estado listo.'));
+        if (!in_array($run->status, [
+            CollectionNoticeRunStatus::PENDING->value,
+            CollectionNoticeRunStatus::VALIDATION_FAILED->value,
+        ], true)) {
+            throw new RuntimeException(__('Solo puedes eliminar comunicados en estado pendiente o con validación fallida.'));
         }
 
         $fileReferences = $run->files

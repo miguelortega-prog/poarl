@@ -21,6 +21,9 @@
             </div>
 
             <div class="hidden sm:flex sm:items-center sm:space-x-6">
+                <!-- Notifications Dropdown -->
+                @livewire('notifications-dropdown')
+
                 <!-- Teams Dropdown -->
                 @if (Laravel\Jetstream\Jetstream::hasTeamFeatures())
                     <div class="relative">
@@ -127,7 +130,11 @@
             </div>
 
             <!-- Hamburger -->
-            <div class="-me-2 flex items-center sm:hidden">
+            <div class="-me-2 flex items-center gap-2 sm:hidden">
+                <!-- Notifications (Mobile) -->
+                @livewire('notifications-dropdown')
+
+                <!-- User Menu Toggle -->
                 <button
                     type="button"
                     class="inline-flex items-center justify-center rounded-full border border-transparent p-1 text-gray-500 dark:text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-white dark:focus:ring-offset-gray-900 transition"

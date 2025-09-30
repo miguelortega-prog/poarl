@@ -175,6 +175,21 @@ class CreateRunModal extends Component
 
     public function getIsFormValidProperty(): bool
     {
+        $checks = [
+            'typeId_filled' => filled($this->typeId),
+            'period_valid' => $this->periodInputIsValid(),
+            'has_dataSources' => count($this->dataSources) > 0,
+            'all_files_selected' => $this->allFilesSelected(),
+            'no_errors' => $this->getErrorBag()->isEmpty(),
+        ];
+
+        Log::debug('CreateRunModal::isFormValid check', array_merge($checks, [
+            'typeId' => $this->typeId,
+            'files_count' => count($this->files),
+            'dataSources_count' => count($this->dataSources),
+            'errors' => $this->getErrorBag()->toArray(),
+        ]));
+
         return filled($this->typeId)
             && $this->periodInputIsValid()
             && count($this->dataSources) > 0
@@ -567,7 +582,23 @@ class CreateRunModal extends Component
 
     public function submit(): void
     {
-        $this->validate();
+        Log::info('CreateRunModal::submit iniciado', [
+            'typeId' => $this->typeId,
+            'periodMode' => $this->periodMode,
+            'periodValue' => $this->periodValue,
+            'files_keys' => array_keys($this->files),
+            'dataSources_count' => count($this->dataSources),
+        ]);
+
+        try {
+            $this->validate();
+        } catch (Throwable $e) {
+            Log::error('Error de validación en CreateRunModal', [
+                'errors' => $this->getErrorBag()->toArray(),
+                'exception' => $e->getMessage(),
+            ]);
+            throw $e;
+        }
 
         $userId = (int) auth()->id();
 
