@@ -27,4 +27,13 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
     Route::post('/recaudo/comunicados/uploads/chunk', [CollectionNoticeChunkUploadController::class, 'store'])
         ->name('recaudo.comunicados.uploads.chunk');
+
+    Route::delete('/recaudo/comunicados/files/{file}', App\Http\Controllers\Recaudo\Comunicados\DeleteCollectionNoticeRunFileController::class)
+        ->name('recaudo.comunicados.files.destroy');
+
+    Route::post('/recaudo/comunicados/files/{file}/replace', App\Http\Controllers\Recaudo\Comunicados\ReplaceFileController::class)
+        ->name('recaudo.comunicados.files.replace');
+
+    Route::post('/recaudo/comunicados/{run}/revalidate', App\Http\Controllers\Recaudo\Comunicados\RevalidateRunController::class)
+        ->name('recaudo.comunicados.revalidate');
 });

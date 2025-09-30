@@ -1,16 +1,20 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\UseCases\Recaudo\Comunicados;
 
-use App\Repositories\Interfaces\CollectionNoticeRunFileRepositoryInterface;
-use App\Repositories\Interfaces\CollectionNoticeRunRepositoryInterface;
 use App\DTOs\Recaudo\Comunicados\CreateCollectionNoticeRunDto;
 use App\DTOs\Recaudo\Comunicados\RunStoredFileDto;
-use App\Models\CollectionNoticeType;
+use App\Jobs\ProcessCollectionRunValidation;
 use App\Models\CollectionNoticeRun;
+use App\Models\CollectionNoticeType;
+use App\Repositories\Interfaces\CollectionNoticeRunFileRepositoryInterface;
+use App\Repositories\Interfaces\CollectionNoticeRunRepositoryInterface;
 use App\Services\Uploads\ChunkedUploadCleaner;
 use Illuminate\Contracts\Filesystem\Factory as FilesystemFactory;
 use Illuminate\Database\DatabaseManager;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use RuntimeException;
 use Throwable;
@@ -131,8 +135,13 @@ final class CreateCollectionNoticeRunUseCase
                 );
             }
 
-            // (opcional) despachar evento para encolar procesamiento
-            // event(new CollectionNoticeRunCreated($run));
+            // Despachar Job de validación
+            Log::info('Despachando job de validación para CollectionNoticeRun', [
+                'run_id' => $run->id,
+                'type_id' => $run->collection_notice_type_id,
+            ]);
+
+            ProcessCollectionRunValidation::dispatch($run->id);
 
             return ['run' => $run];
         }, 3);
@@ -142,12 +151,13 @@ final class CreateCollectionNoticeRunUseCase
             }
 
             throw $e;
-        }
+        } finally {
+            // Limpiar uploads expirados
+            $ttlMinutes = (int) config('chunked-uploads.collection_notices.cleanup_ttl_minutes');
 
-        $ttlMinutes = (int) config('chunked-uploads.collection_notices.cleanup_ttl_minutes');
-
-        if ($ttlMinutes > 0) {
-            $this->uploadCleaner->purgeExpired($ttlMinutes);
+            if ($ttlMinutes > 0) {
+                $this->uploadCleaner->purgeExpired($ttlMinutes);
+            }
         }
     }
 }

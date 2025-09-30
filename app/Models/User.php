@@ -96,5 +96,32 @@ class User extends Authenticatable
     public function team(): BelongsTo
     {
         return $this->belongsTo(Team::class);
-    }    
+    }
+
+    public function notifications(): HasMany
+    {
+        return $this->hasMany(UserNotification::class, 'user_id');
+    }
+
+    public function unreadNotifications(): HasMany
+    {
+        return $this->notifications()->unread();
+    }
+
+    /**
+     * Obtiene todos los IDs de usuarios subordinados recursivamente.
+     *
+     * @return array<int, int>
+     */
+    public function getAllSubordinateIds(): array
+    {
+        $ids = [];
+
+        foreach ($this->subordinates as $subordinate) {
+            $ids[] = $subordinate->id;
+            $ids = array_merge($ids, $subordinate->getAllSubordinateIds());
+        }
+
+        return $ids;
+    }
 }
