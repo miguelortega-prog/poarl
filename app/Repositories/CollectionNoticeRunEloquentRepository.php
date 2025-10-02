@@ -16,7 +16,7 @@ final class CollectionNoticeRunEloquentRepository implements CollectionNoticeRun
     {
         return CollectionNoticeRun::query()->create([
             'collection_notice_type_id' => $dto->collectionNoticeTypeId,
-            'period_value'              => $dto->periodValue,
+            'period'                    => $dto->periodValue,
             'requested_by_id'           => $dto->requestedById,
             'status'                    => CollectionNoticeRunStatus::PENDING->value,
         ]);
@@ -43,6 +43,7 @@ final class CollectionNoticeRunEloquentRepository implements CollectionNoticeRun
                 'files:id,collection_notice_run_id,original_name,notice_data_source_id,uploaded_by,created_at',
                 'files.dataSource:id,name',
                 'files.uploader:id,name',
+                'resultFiles:id,collection_notice_run_id,file_type,file_name,records_count',
             ]);
 
         $this->applyFilters($query, $filters);

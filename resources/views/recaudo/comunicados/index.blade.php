@@ -120,8 +120,9 @@
                         </div>
                     </form>
 
-                    <div class="grid grid-cols-9 gap-4 rounded-2xl bg-gray-100 px-6 py-3 text-label font-semibold uppercase tracking-wide text-gray-700 dark:bg-gray-900/60 dark:text-gray-200">
+                    <div class="grid grid-cols-10 gap-4 rounded-2xl bg-gray-100 px-6 py-3 text-label font-semibold uppercase tracking-wide text-gray-700 dark:bg-gray-900/60 dark:text-gray-200">
                         <span>{{ __('Id Comunicado') }}</span>
+                        <span>{{ __('Periodo') }}</span>
                         <span>{{ __('Fecha Programación') }}</span>
                         <span>{{ __('Usuario Programación') }}</span>
                         <span>{{ __('Fecha Ejecución') }}</span>
@@ -139,8 +140,11 @@
                                 \App\Enums\Recaudo\CollectionNoticeRunStatus::VALIDATION_FAILED->value,
                             ], true);
                         @endphp
-                        <div class="grid grid-cols-9 items-center gap-4 rounded-2xl border border-gray-200 px-6 py-4 text-body text-gray-700 transition dark:border-gray-700 dark:text-gray-200">
+                        <div class="grid grid-cols-10 items-center gap-4 rounded-2xl border border-gray-200 px-6 py-4 text-body text-gray-700 transition dark:border-gray-700 dark:text-gray-200">
                             <span class="font-semibold text-gray-900 dark:text-gray-100">#{{ $run->id }}</span>
+                            <span class="text-sm">
+                                {{ $run->period === '*' ? __('Todos') : ($run->period ?? __('N/D')) }}
+                            </span>
                             <span>{{ optional($run->created_at)->format('d/m/Y H:i') ?? __('Sin programación') }}</span>
                             <span>{{ $run->requestedBy?->name ?? __('No asignado') }}</span>
                             <span>
@@ -171,9 +175,24 @@
                                     </span>
                                 @endif
                             </span>
-                            <span>
-                                {{ $run->type?->name ?? __('Sin tipo') }}
-                            </span>
+                            <div>
+                                @if($run->resultFiles->isNotEmpty())
+                                    <div class="flex flex-col gap-1">
+                                        @foreach($run->resultFiles as $resultFile)
+                                            <a
+                                                href="{{ route('recaudo.comunicados.download-result', ['run' => $run->id, 'file' => $resultFile->id]) }}"
+                                                class="inline-flex items-center gap-1 text-xs text-primary hover:text-primary-600 hover:underline"
+                                                title="{{ $resultFile->file_name }} ({{ number_format($resultFile->records_count) }} registros)"
+                                            >
+                                                <i class="fa-solid fa-download"></i>
+                                                <span>{{ $resultFile->file_type }}</span>
+                                            </a>
+                                        @endforeach
+                                    </div>
+                                @else
+                                    <span class="text-xs text-gray-400">{{ __('Sin resultados') }}</span>
+                                @endif
+                            </div>
                             <div x-data="{ openFiles: false, openErrors: false }" class="relative flex justify-center gap-2">
                                 {{-- Botón Ver Archivos --}}
                                 <button

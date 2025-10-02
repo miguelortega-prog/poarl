@@ -85,11 +85,21 @@ final class ProcessCollectionRunValidation implements ShouldQueue
             }
 
             // Ejecutar validación mediante el servicio
-            $validationService->validate($run);
+            $validationSuccess = $validationService->validate($run);
 
-            Log::info('Validación de CollectionNoticeRun completada exitosamente', [
+            Log::info('Validación de CollectionNoticeRun completada', [
                 'run_id' => $run->id,
+                'success' => $validationSuccess,
             ]);
+
+            // Si la validación fue exitosa, disparar job de procesamiento
+            if ($validationSuccess) {
+                Log::info('Disparando job de procesamiento de datos', [
+                    'run_id' => $run->id,
+                ]);
+
+                ProcessCollectionNoticeRunData::dispatch($run->id);
+            }
         } catch (Throwable $exception) {
             Log::error('Error al validar CollectionNoticeRun', [
                 'run_id' => $this->collectionNoticeRunId,
