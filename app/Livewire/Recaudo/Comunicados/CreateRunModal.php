@@ -183,13 +183,6 @@ class CreateRunModal extends Component
             'no_errors' => $this->getErrorBag()->isEmpty(),
         ];
 
-        Log::debug('CreateRunModal::isFormValid check', array_merge($checks, [
-            'typeId' => $this->typeId,
-            'files_count' => count($this->files),
-            'dataSources_count' => count($this->dataSources),
-            'errors' => $this->getErrorBag()->toArray(),
-        ]));
-
         return filled($this->typeId)
             && $this->periodInputIsValid()
             && count($this->dataSources) > 0

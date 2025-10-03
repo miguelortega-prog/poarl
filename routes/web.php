@@ -37,6 +37,6 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('/recaudo/comunicados/{run}/revalidate', App\Http\Controllers\Recaudo\Comunicados\RevalidateRunController::class)
         ->name('recaudo.comunicados.revalidate');
 
-    Route::get('/recaudo/comunicados/{run}/results/{file}', App\Http\Controllers\Recaudo\Comunicados\DownloadResultFileController::class)
+    Route::get('/recaudo/comunicados/{run}/results/{resultFile}', App\Http\Controllers\Recaudo\Comunicados\DownloadResultFileController::class)
         ->name('recaudo.comunicados.download-result');
 });

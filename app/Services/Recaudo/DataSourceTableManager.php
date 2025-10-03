@@ -15,7 +15,7 @@ use Illuminate\Support\Facades\Log;
  */
 final class DataSourceTableManager
 {
-    private const CHUNK_SIZE = 10000;
+    private const CHUNK_SIZE = 5000;
 
     private const TABLE_MAP = [
         'BASCAR' => 'data_source_bascar',

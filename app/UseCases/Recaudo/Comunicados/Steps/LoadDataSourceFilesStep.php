@@ -89,8 +89,8 @@ final readonly class LoadDataSourceFilesStep implements ProcessingStepInterface
                 'file_path' => $file->path,
             ]);
 
-            // Leer e insertar en chunks de 10000 filas (no cargar todo en memoria)
-            $chunkSize = 10000;
+            // Leer e insertar en chunks de 5000 filas (no cargar todo en memoria)
+            $chunkSize = 5000;
             $chunk = [];
             $insertedCount = 0;
             $chunkNumber = 0;

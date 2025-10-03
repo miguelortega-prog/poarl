@@ -18,6 +18,131 @@ use RuntimeException;
 final class ExcelToCsvConverter
 {
     /**
+     * Convierte todas las hojas de un Excel a CSVs separados con columna sheet_name.
+     *
+     * @param Filesystem $disk Disco donde está el archivo
+     * @param string $excelPath Ruta relativa del archivo Excel
+     * @param string $outputDir Directorio donde guardar los CSVs
+     * @param string $delimiter Delimitador del CSV (por defecto punto y coma)
+     *
+     * @return array{sheets: array<string, array{path: string, rows: int, size: int}>} Información de cada CSV generado
+     *
+     * @throws RuntimeException
+     */
+    public function convertAllSheetsToSeparateCSVs(
+        Filesystem $disk,
+        string $excelPath,
+        string $outputDir,
+        string $delimiter = ';'
+    ): array {
+        $startTime = microtime(true);
+
+        if (!$disk->exists($excelPath)) {
+            throw new RuntimeException(sprintf('Archivo Excel no encontrado: %s', $excelPath));
+        }
+
+        Log::info('Iniciando conversión Excel multi-hoja a CSVs separados', [
+            'excel_path' => $excelPath,
+            'output_dir' => $outputDir,
+            'delimiter' => $delimiter,
+        ]);
+
+        // Crear directorio de salida si no existe
+        if (!$disk->exists($outputDir)) {
+            $disk->makeDirectory($outputDir);
+        }
+
+        $absoluteExcelPath = $disk->path($excelPath);
+        $sheets = [];
+
+        try {
+            $reader = new Reader();
+            $reader->open($absoluteExcelPath);
+
+            foreach ($reader->getSheetIterator() as $sheet) {
+                $sheetName = $sheet->getName();
+                $csvFileName = sprintf('%s_%s.csv', pathinfo($excelPath, PATHINFO_FILENAME), $sheetName);
+                $csvPath = $outputDir . '/' . $csvFileName;
+                $absoluteCsvPath = $disk->path($csvPath);
+
+                Log::info('Procesando hoja Excel a CSV separado', [
+                    'sheet_name' => $sheetName,
+                    'csv_path' => $csvPath,
+                ]);
+
+                $csvHandle = fopen($absoluteCsvPath, 'w');
+                if ($csvHandle === false) {
+                    throw new RuntimeException("No se pudo crear el archivo CSV: {$csvPath}");
+                }
+
+                $totalRows = 0;
+                $isFirstRow = true;
+
+                foreach ($sheet->getRowIterator() as $row) {
+                    $cells = $row->getCells();
+                    $rowData = array_map(function($cell) {
+                        $value = $cell->getValue();
+                        // Convertir DateTimeImmutable a string
+                        if ($value instanceof \DateTimeInterface) {
+                            return $value->format('Y-m-d H:i:s');
+                        }
+                        return $value;
+                    }, $cells);
+
+                    // Agregar columna sheet_name al final
+                    if ($isFirstRow) {
+                        $rowData[] = 'sheet_name';
+                        $isFirstRow = false;
+                    } else {
+                        $rowData[] = $sheetName;
+                    }
+
+                    fputcsv($csvHandle, $rowData, $delimiter);
+                    $totalRows++;
+
+                    if ($totalRows % 10000 === 0) {
+                        Log::info('Progreso conversión hoja a CSV', [
+                            'sheet_name' => $sheetName,
+                            'rows_processed' => $totalRows,
+                        ]);
+                    }
+                }
+
+                fclose($csvHandle);
+
+                $fileSize = $disk->size($csvPath);
+                $sheets[$sheetName] = [
+                    'path' => $csvPath,
+                    'rows' => $totalRows,
+                    'size' => $fileSize,
+                ];
+
+                Log::info('Hoja convertida a CSV', [
+                    'sheet_name' => $sheetName,
+                    'csv_path' => $csvPath,
+                    'rows' => $totalRows,
+                    'size_mb' => round($fileSize / 1024 / 1024, 2),
+                ]);
+            }
+
+            $reader->close();
+
+        } catch (\Throwable $e) {
+            throw new RuntimeException('Error al convertir Excel multi-hoja: ' . $e->getMessage(), 0, $e);
+        }
+
+        $duration = (int) ((microtime(true) - $startTime) * 1000);
+
+        Log::info('Conversión Excel multi-hoja completada', [
+            'excel_path' => $excelPath,
+            'total_sheets' => count($sheets),
+            'duration_ms' => $duration,
+        ]);
+
+        return ['sheets' => $sheets];
+    }
+
+    /**
      * Convierte un archivo Excel a CSV con streaming (OpenSpout).
      *
      * @param Filesystem $disk Disco donde está el archivo

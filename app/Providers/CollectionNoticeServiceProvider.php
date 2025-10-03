@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Providers;
 
 use App\Contracts\Recaudo\Comunicados\CollectionNoticeProcessorInterface;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\ServiceProvider;
 use RuntimeException;
 
@@ -55,11 +54,6 @@ final class CollectionNoticeServiceProvider extends ServiceProvider
         foreach ($processors as $type => $processorClass) {
             // Registrar cada procesador como singleton
             $this->app->singleton($processorClass);
-
-            Log::debug('Procesador registrado', [
-                'type' => $type,
-                'class' => $processorClass,
-            ]);
         }
     }
 

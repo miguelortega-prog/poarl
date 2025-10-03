@@ -27,7 +27,7 @@ use RuntimeException;
 final readonly class LoadPagaplSheetByPeriodStep implements ProcessingStepInterface
 {
     private const PAGAPL_CODE = 'PAGAPL';
-    private const CHUNK_SIZE = 10000;
+    private const CHUNK_SIZE = 5000;
 
     public function __construct(
         private FilesystemFactory $filesystem,

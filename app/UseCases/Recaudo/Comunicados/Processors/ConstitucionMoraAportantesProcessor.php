@@ -7,12 +7,12 @@ namespace App\UseCases\Recaudo\Comunicados\Processors;
 use App\Models\CollectionNoticeRun;
 use App\Services\Recaudo\Comunicados\BaseCollectionNoticeProcessor;
 use App\Services\Recaudo\DataSourceTableManager;
+use App\UseCases\Recaudo\Comunicados\Steps\CountDettraWorkersAndUpdateBascarStep;
 use App\UseCases\Recaudo\Comunicados\Steps\CrossBascarWithPagaplStep;
 use App\UseCases\Recaudo\Comunicados\Steps\FilterBascarByPeriodStep;
 use App\UseCases\Recaudo\Comunicados\Steps\GenerateBascarCompositeKeyStep;
 use App\UseCases\Recaudo\Comunicados\Steps\GeneratePagaplCompositeKeyStep;
-use App\UseCases\Recaudo\Comunicados\Steps\LoadDataSourceFilesStep;
-use App\UseCases\Recaudo\Comunicados\Steps\LoadPagaplSheetByPeriodStep;
+use App\UseCases\Recaudo\Comunicados\Steps\RemoveCrossedBascarRecordsStep;
 use App\UseCases\Recaudo\Comunicados\Steps\ValidateDataIntegrityStep;
 use Illuminate\Contracts\Filesystem\Factory as FilesystemFactory;
 
@@ -41,13 +41,13 @@ final class ConstitucionMoraAportantesProcessor extends BaseCollectionNoticeProc
     public function __construct(
         DataSourceTableManager $tableManager,
         FilesystemFactory $filesystem,
-        private readonly LoadDataSourceFilesStep $loadFilesStep,
         private readonly ValidateDataIntegrityStep $validateDataStep,
         private readonly FilterBascarByPeriodStep $filterBascarStep,
         private readonly GenerateBascarCompositeKeyStep $generateBascarKeysStep,
-        private readonly LoadPagaplSheetByPeriodStep $loadPagaplStep,
         private readonly GeneratePagaplCompositeKeyStep $generatePagaplKeysStep,
         private readonly CrossBascarWithPagaplStep $crossBascarPagaplStep,
+        private readonly RemoveCrossedBascarRecordsStep $removeCrossedBascarStep,
+        private readonly CountDettraWorkersAndUpdateBascarStep $countDettraWorkersStep,
     ) {
         parent::__construct($tableManager, $filesystem);
         $this->initializeSteps();
@@ -89,37 +89,41 @@ final class ConstitucionMoraAportantesProcessor extends BaseCollectionNoticeProc
     /**
      * Define los pasos del pipeline para este procesador.
      *
+     * NOTA: Los pasos de carga de archivos (LoadDataSourceFilesStep, LoadPagaplSheetByPeriodStep, LoadDettraAllSheetsStep)
+     * ya NO se ejecutan aquí porque se manejan en jobs paralelos antes de este procesador.
+     *
+     * Este procesador solo ejecuta operaciones SQL puras sobre datos ya cargados en BD.
+     *
      * @return array<int, \App\Contracts\Recaudo\Comunicados\ProcessingStepInterface>
      */
     protected function defineSteps(): array
     {
         return [
-            // Paso 1: Cargar metadata de archivos
-            $this->loadFilesStep,
-
-            // Paso 2: Validar integridad de datos
+            // Paso 1: Validar integridad de datos en BD (verificar que todos los archivos se cargaron)
             $this->validateDataStep,
 
-            // Paso 3: Filtrar BASCAR por periodo
+            // Paso 2: Filtrar BASCAR por periodo (SQL UPDATE)
             $this->filterBascarStep,
 
-            // Paso 4: Generar llaves compuestas en BASCAR (NUM_TOMADOR + periodo)
+            // Paso 3: Generar llaves compuestas en BASCAR (SQL UPDATE)
             $this->generateBascarKeysStep,
 
-            // Paso 5: Cargar hoja de PAGAPL correspondiente al periodo
-            $this->loadPagaplStep,
-
-            // Paso 6: Generar llaves compuestas en PAGAPL (Identificación + Periodo)
+            // Paso 4: Generar llaves compuestas en PAGAPL (SQL UPDATE)
             $this->generatePagaplKeysStep,
 
-            // Paso 7: Cruzar BASCAR con PAGAPL y generar archivo de excluidos
+            // Paso 5: Cruzar BASCAR con PAGAPL y generar archivo de excluidos (SQL + tabla temporal)
             $this->crossBascarPagaplStep,
 
+            // Paso 6: Eliminar de BASCAR los registros que cruzaron con PAGAPL (SQL DELETE)
+            $this->removeCrossedBascarStep,
+
+            // Paso 7: Contar trabajadores de DETTRA y actualizar BASCAR (SQL UPDATE)
+            $this->countDettraWorkersStep,
+
             // TODO: Paso 8 - Cruzar con BAPRPO (base producción por póliza)
-            // TODO: Paso 7 - Cruzar con PAGPLA (pagos planilla)
-            // TODO: Paso 8 - Cruzar con DATPOL
-            // TODO: Paso 9 - Cruzar con DETTRA (detalle trabajadores)
-            // TODO: Paso 10 - Generar archivos de salida
+            // TODO: Paso 9 - Cruzar con PAGPLA (pagos planilla)
+            // TODO: Paso 10 - Cruzar con DATPOL
+            // TODO: Paso 11 - Generar archivos de salida
         ];
     }
 }

@@ -180,7 +180,8 @@
                                     <div class="flex flex-col gap-1">
                                         @foreach($run->resultFiles as $resultFile)
                                             <a
-                                                href="{{ route('recaudo.comunicados.download-result', ['run' => $run->id, 'file' => $resultFile->id]) }}"
+                                                href="{{ route('recaudo.comunicados.download-result', ['run' => $run->id, 'resultFile' => $resultFile->id]) }}"
+                                                target="_blank"
                                                 class="inline-flex items-center gap-1 text-xs text-primary hover:text-primary-600 hover:underline"
                                                 title="{{ $resultFile->file_name }} ({{ number_format($resultFile->records_count) }} registros)"
                                             >

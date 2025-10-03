@@ -6,10 +6,12 @@ namespace App\Jobs;
 
 use App\Models\CollectionNoticeRun;
 use App\Services\CollectionRun\CollectionRunValidationService;
+use Illuminate\Bus\Batch;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -92,13 +94,68 @@ final class ProcessCollectionRunValidation implements ShouldQueue
                 'success' => $validationSuccess,
             ]);
 
-            // Si la validación fue exitosa, disparar job de procesamiento
+            // Si la validación fue exitosa, disparar jobs de carga OPTIMIZADOS en paralelo
             if ($validationSuccess) {
-                Log::info('Disparando job de procesamiento de datos', [
+                Log::info('Disparando jobs OPTIMIZADOS de carga (Excel→CSV→COPY) en paralelo', [
                     'run_id' => $run->id,
+                    'period' => $run->period,
                 ]);
 
-                ProcessCollectionNoticeRunData::dispatch($run->id);
+                // Crear batch de jobs optimizados basados en los archivos del run
+                $loadJobs = [];
+
+                // Archivos CSV (usar job antiguo que ya funciona bien)
+                $csvFiles = $run->files()->whereIn('ext', ['csv'])->get();
+                if ($csvFiles->isNotEmpty()) {
+                    $loadJobs[] = new LoadCsvDataSourcesJob($run->id);
+                }
+
+                // Archivos Excel (usar nuevo job optimizado con COPY)
+                $excelFiles = $run->files()->whereIn('ext', ['xlsx', 'xls'])->with('dataSource')->get();
+                foreach ($excelFiles as $file) {
+                    $loadJobs[] = new LoadExcelWithCopyJob($file->id, $file->dataSource->code);
+                }
+
+                Log::info('Jobs de carga creados', [
+                    'run_id' => $run->id,
+                    'total_jobs' => count($loadJobs),
+                    'csv_jobs' => $csvFiles->count() > 0 ? 1 : 0,
+                    'excel_jobs' => $excelFiles->count(),
+                ]);
+
+                // Despachar batch de jobs
+                Bus::batch($loadJobs)
+                ->name("Carga OPTIMIZADA de Data Sources - Run #{$run->id}")
+                ->then(function (Batch $batch) use ($run) {
+                    // Cuando TODOS los jobs de carga completen, disparar procesamiento SQL
+                    Log::info('Todos los archivos cargados (OPTIMIZADO), iniciando procesamiento SQL', [
+                        'run_id' => $run->id,
+                        'batch_id' => $batch->id,
+                    ]);
+
+                    ProcessCollectionDataJob::dispatch($run->id);
+                })
+                ->catch(function (Batch $batch, Throwable $e) use ($run) {
+                    // Si algún job de carga falla
+                    Log::error('Error en carga OPTIMIZADA de data sources', [
+                        'run_id' => $run->id,
+                        'batch_id' => $batch->id,
+                        'error' => $e->getMessage(),
+                    ]);
+
+                    $run->update([
+                        'status' => 'failed',
+                        'failed_at' => now(),
+                        'errors' => [
+                            'message' => 'Error durante la carga optimizada de archivos',
+                            'details' => $e->getMessage(),
+                            'batch_id' => $batch->id,
+                        ],
+                    ]);
+                })
+                ->allowFailures(false) // Si uno falla, detener todo
+                ->onQueue('validation')
+                ->dispatch();
             }
         } catch (Throwable $exception) {
             Log::error('Error al validar CollectionNoticeRun', [

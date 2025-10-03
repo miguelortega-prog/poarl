@@ -49,4 +49,14 @@ class CollectionNoticeRunResultFile extends Model
     {
         return $this->belongsTo(CollectionNoticeRun::class, 'collection_notice_run_id');
     }
+
+    /**
+     * Configurar la clave de la ruta para este modelo.
+     *
+     * @return string
+     */
+    public function getRouteKeyName(): string
+    {
+        return 'id';
+    }
 }

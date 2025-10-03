@@ -50,7 +50,7 @@ final class ProcessCollectionNoticeRunData implements ShouldQueue
     public function __construct(
         private readonly int $runId
     ) {
-        $this->onQueue('collection-notices');
+        $this->onQueue('processing');
     }
 
     /**

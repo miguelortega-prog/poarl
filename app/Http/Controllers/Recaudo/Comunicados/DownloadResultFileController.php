@@ -20,29 +20,35 @@ final readonly class DownloadResultFileController
     /**
      * Descarga un archivo de resultados de un run.
      *
-     * @param CollectionNoticeRun $run
-     * @param CollectionNoticeRunResultFile $file
+     * @param int $run
+     * @param int $resultFile
      *
      * @return \Symfony\Component\HttpFoundation\StreamedResponse
      */
-    public function __invoke(CollectionNoticeRun $run, CollectionNoticeRunResultFile $file): StreamedResponse
+    public function __invoke(int $run, int $resultFile): StreamedResponse
     {
+        // Buscar el run
+        $runModel = CollectionNoticeRun::findOrFail($run);
+
+        // Buscar el archivo de resultados
+        $resultFileModel = CollectionNoticeRunResultFile::findOrFail($resultFile);
+
         // Validar que el archivo pertenece al run
-        if ($file->collection_notice_run_id !== $run->id) {
+        if ($resultFileModel->collection_notice_run_id !== $runModel->id) {
             abort(Response::HTTP_NOT_FOUND, 'Archivo no encontrado');
         }
 
-        $disk = $this->filesystem->disk($file->disk);
+        $disk = $this->filesystem->disk($resultFileModel->disk);
 
         // Validar que el archivo existe
-        if (!$disk->exists($file->path)) {
+        if (!$disk->exists($resultFileModel->path)) {
             abort(Response::HTTP_NOT_FOUND, 'Archivo no encontrado en el disco');
         }
 
         // Preparar headers para descarga
         $headers = [
             'Content-Type' => 'text/csv; charset=utf-8',
-            'Content-Disposition' => sprintf('attachment; filename="%s"', $file->file_name),
+            'Content-Disposition' => sprintf('attachment; filename="%s"', $resultFileModel->file_name),
             'Cache-Control' => 'no-cache, no-store, must-revalidate',
             'Pragma' => 'no-cache',
             'Expires' => '0',
@@ -50,8 +56,8 @@ final readonly class DownloadResultFileController
 
         // Retornar stream del archivo
         return response()->stream(
-            function () use ($disk, $file): void {
-                $stream = $disk->readStream($file->path);
+            function () use ($disk, $resultFileModel): void {
+                $stream = $disk->readStream($resultFileModel->path);
 
                 if ($stream === false) {
                     return;
