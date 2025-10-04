@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Jobs;
 
 use App\Models\CollectionNoticeRun;
+use App\DTOs\Recaudo\SanitizedCsvResultDto;
+use App\Services\Recaudo\CsvSanitizerService;
 use App\Services\Recaudo\PostgreSQLCopyImporter;
 use Illuminate\Bus\Batchable;
 use Illuminate\Bus\Queueable;
@@ -45,11 +47,6 @@ final class LoadCsvDataSourcesJob implements ShouldQueue
     public int $timeout = 300;
 
     /**
-     * Códigos de data sources CSV a cargar.
-     */
-    private const CSV_DATA_SOURCES = ['BASCAR', 'BAPRPO', 'DATPOL'];
-
-    /**
      * Map de códigos a tablas PostgreSQL.
      */
     private const TABLE_MAP = [
@@ -72,7 +69,8 @@ final class LoadCsvDataSourcesJob implements ShouldQueue
      */
     public function handle(
         FilesystemFactory $filesystem,
-        PostgreSQLCopyImporter $importer
+        PostgreSQLCopyImporter $importer,
+        CsvSanitizerService $csvSanitizer
     ): void {
         // Verificar si el batch fue cancelado
         if ($this->batch()?->cancelled()) {
@@ -97,7 +95,7 @@ final class LoadCsvDataSourcesJob implements ShouldQueue
                 $extension = strtolower($file->ext ?? '');
 
                 // Solo procesar archivos CSV de los data sources esperados
-                if (!in_array($dataSourceCode, self::CSV_DATA_SOURCES, true)) {
+                if (!array_key_exists($dataSourceCode, self::TABLE_MAP)) {
                     continue;
                 }
 
@@ -117,6 +115,7 @@ final class LoadCsvDataSourcesJob implements ShouldQueue
                 }
 
                 $csvPath = $disk->path($file->path);
+                $sanitizedResult = null;
                 $fileSize = $disk->size($file->path);
 
                 Log::info('📥 Cargando CSV con PostgreSQL COPY', [
@@ -126,6 +125,23 @@ final class LoadCsvDataSourcesJob implements ShouldQueue
                     'file_path' => $file->path,
                     'size_mb' => round($fileSize / 1024 / 1024, 2),
                 ]);
+
+                // Determinar si se requiere sanitización previa
+                if ($csvSanitizer->supports($dataSourceCode)) {
+                    Log::info('🔄 Sanitizando CSV previo a COPY', [
+                        'run_id' => $run->id,
+                        'data_source' => $dataSourceCode,
+                        'job' => self::class,
+                    ]);
+
+                    $sanitizedResult = $csvSanitizer->sanitize(
+                        $csvPath,
+                        (int) $run->id,
+                        $dataSourceCode
+                    );
+
+                    $csvPath = $sanitizedResult->path;
+                }
 
                 // Obtener columnas de la tabla (excluir id y created_at)
                 $columns = \DB::select(
@@ -138,14 +154,18 @@ final class LoadCsvDataSourcesJob implements ShouldQueue
                 );
                 $columns = array_column($columns, 'column_name');
 
-                // Usar PostgreSQL COPY FROM STDIN (10-50x más rápido)
-                $result = $importer->importFromFile(
-                    $tableName,
-                    $csvPath,
-                    $columns,
-                    ';',
-                    true // hasHeader
-                );
+                try {
+                    // Usar PostgreSQL COPY FROM STDIN (10-50x más rápido)
+                    $result = $importer->importFromFile(
+                        $tableName,
+                        $csvPath,
+                        $columns,
+                        ';',
+                        true // hasHeader
+                    );
+                } finally {
+                    $this->cleanupTemporaryCsv($sanitizedResult);
+                }
 
                 $totalRowsLoaded += $result['rows'];
 
@@ -195,5 +215,16 @@ final class LoadCsvDataSourcesJob implements ShouldQueue
             'run_id' => $this->runId,
             'error' => $exception->getMessage(),
         ]);
+    }
+
+    private function cleanupTemporaryCsv(?SanitizedCsvResultDto $sanitizedResult): void
+    {
+        if ($sanitizedResult === null) {
+            return;
+        }
+
+        if ($sanitizedResult->temporary && file_exists($sanitizedResult->path)) {
+            @unlink($sanitizedResult->path);
+        }
     }
 }
