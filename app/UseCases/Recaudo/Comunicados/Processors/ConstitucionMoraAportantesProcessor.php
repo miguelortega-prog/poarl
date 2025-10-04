@@ -7,11 +7,14 @@ namespace App\UseCases\Recaudo\Comunicados\Processors;
 use App\Models\CollectionNoticeRun;
 use App\Services\Recaudo\Comunicados\BaseCollectionNoticeProcessor;
 use App\Services\Recaudo\DataSourceTableManager;
+use App\UseCases\Recaudo\Comunicados\Steps\ConvertExcelToCSVStep;
 use App\UseCases\Recaudo\Comunicados\Steps\CountDettraWorkersAndUpdateBascarStep;
 use App\UseCases\Recaudo\Comunicados\Steps\CrossBascarWithPagaplStep;
 use App\UseCases\Recaudo\Comunicados\Steps\FilterBascarByPeriodStep;
 use App\UseCases\Recaudo\Comunicados\Steps\GenerateBascarCompositeKeyStep;
 use App\UseCases\Recaudo\Comunicados\Steps\GeneratePagaplCompositeKeyStep;
+use App\UseCases\Recaudo\Comunicados\Steps\LoadCsvDataSourcesStep;
+use App\UseCases\Recaudo\Comunicados\Steps\LoadExcelCSVsStep;
 use App\UseCases\Recaudo\Comunicados\Steps\RemoveCrossedBascarRecordsStep;
 use App\UseCases\Recaudo\Comunicados\Steps\ValidateDataIntegrityStep;
 use Illuminate\Contracts\Filesystem\Factory as FilesystemFactory;
@@ -41,6 +44,9 @@ final class ConstitucionMoraAportantesProcessor extends BaseCollectionNoticeProc
     public function __construct(
         DataSourceTableManager $tableManager,
         FilesystemFactory $filesystem,
+        private readonly LoadCsvDataSourcesStep $loadCsvDataSourcesStep,
+        private readonly ConvertExcelToCSVStep $convertExcelToCSVStep,
+        private readonly LoadExcelCSVsStep $loadExcelCSVsStep,
         private readonly ValidateDataIntegrityStep $validateDataStep,
         private readonly FilterBascarByPeriodStep $filterBascarStep,
         private readonly GenerateBascarCompositeKeyStep $generateBascarKeysStep,
@@ -89,41 +95,61 @@ final class ConstitucionMoraAportantesProcessor extends BaseCollectionNoticeProc
     /**
      * Define los pasos del pipeline para este procesador.
      *
-     * NOTA: Los pasos de carga de archivos (LoadDataSourceFilesStep, LoadPagaplSheetByPeriodStep, LoadDettraAllSheetsStep)
-     * ya NO se ejecutan aquí porque se manejan en jobs paralelos antes de este procesador.
+     * FLUJO OPTIMIZADO CON GO STREAMING + POSTGRESQL COPY:
      *
-     * Este procesador solo ejecuta operaciones SQL puras sobre datos ya cargados en BD.
+     * FASE 1: CARGA DE DATOS
+     * - Paso 1: Cargar CSVs directos con COPY (BASCAR, BAPRPO, DATPOL)
+     * - Paso 2: Convertir Excel a CSV con Go streaming (DETTRA, PAGAPL, PAGPLA) - PASO CRÍTICO
+     * - Paso 3: Cargar CSVs generados con COPY (DETTRA, PAGAPL, PAGPLA)
+     * - Paso 4: Validar integridad de datos
+     *
+     * FASE 2: TRANSFORMACIÓN SQL
+     * - Paso 5: TODO - Depurar tablas (eliminar registros no necesarios)
+     * - Paso 6-11: Operaciones SQL de cruce y transformación
      *
      * @return array<int, \App\Contracts\Recaudo\Comunicados\ProcessingStepInterface>
      */
     protected function defineSteps(): array
     {
         return [
-            // Paso 1: Validar integridad de datos en BD (verificar que todos los archivos se cargaron)
+            // === FASE 1: CARGA DE DATOS A BD ===
+
+            // Paso 1: Cargar archivos CSV directos (BASCAR, BAPRPO, DATPOL) con PostgreSQL COPY
+            $this->loadCsvDataSourcesStep,
+
+            // Paso 2: CRÍTICO - Convertir Excel a CSV usando Go streaming (DETTRA, PAGAPL, PAGPLA)
+            // Este es el paso más pesado: archivos 190MB+ procesados sin cargar todo en memoria
+            $this->convertExcelToCSVStep,
+
+            // Paso 3: Cargar CSVs generados en Paso 2 usando PostgreSQL COPY
+            $this->loadExcelCSVsStep,
+
+            // Paso 4: Validar integridad de datos en BD (verificar que todos los archivos se cargaron)
             $this->validateDataStep,
 
-            // Paso 2: Filtrar BASCAR por periodo (SQL UPDATE)
-            $this->filterBascarStep,
+            // === FASE 2: TRANSFORMACIÓN Y CRUCE DE DATOS SQL ===
 
-            // Paso 3: Generar llaves compuestas en BASCAR (SQL UPDATE)
+            // Paso 5: TODO - Depurar tablas (eliminar registros que no se usarán)
+            // PENDIENTE DE IMPLEMENTAR
+
+            // Paso 6: Generar llaves compuestas en BASCAR (SQL UPDATE)
             $this->generateBascarKeysStep,
 
-            // Paso 4: Generar llaves compuestas en PAGAPL (SQL UPDATE)
+            // Paso 7: Generar llaves compuestas en PAGAPL (SQL UPDATE)
             $this->generatePagaplKeysStep,
 
-            // Paso 5: Cruzar BASCAR con PAGAPL y generar archivo de excluidos (SQL + tabla temporal)
+            // Paso 8: Cruzar BASCAR con PAGAPL y generar archivo de excluidos (SQL + tabla temporal)
             $this->crossBascarPagaplStep,
 
-            // Paso 6: Eliminar de BASCAR los registros que cruzaron con PAGAPL (SQL DELETE)
+            // Paso 9: Eliminar de BASCAR los registros que cruzaron con PAGAPL (SQL DELETE)
             $this->removeCrossedBascarStep,
 
-            // Paso 7: Contar trabajadores de DETTRA y actualizar BASCAR (SQL UPDATE)
+            // Paso 10: TODO - Nuevo cruce (pendiente definición de reglas)
+
+            // Paso 11: Contar trabajadores de DETTRA y actualizar BASCAR (SQL UPDATE)
             $this->countDettraWorkersStep,
 
-            // TODO: Paso 8 - Cruzar con BAPRPO (base producción por póliza)
-            // TODO: Paso 9 - Cruzar con PAGPLA (pagos planilla)
-            // TODO: Paso 10 - Cruzar con DATPOL
-            // TODO: Paso 11 - Generar archivos de salida
+            // TODO: Pasos subsecuentes pendientes de definición
         ];
     }
 }

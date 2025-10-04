@@ -68,8 +68,10 @@ final class PostgreSQLCopyImporter
         $password = $config['password'];
 
         // Construir comando COPY
+        // IMPORTANTE: ESCAPE debe ser igual a QUOTE para archivos CSV estándar
+        // Esto evita que PostgreSQL interprete backslashes como escape sequences
         $copySQL = sprintf(
-            "COPY %s (%s) FROM STDIN WITH (FORMAT csv, DELIMITER '%s', %s, NULL '')",
+            "COPY %s (%s) FROM STDIN WITH (FORMAT csv, DELIMITER '%s', QUOTE '\"', ESCAPE '\"', %s, NULL '')",
             $tableName,
             $columnsList,
             $delimiter,

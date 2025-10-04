@@ -19,7 +19,7 @@ use RuntimeException;
  */
 final class GoExcelConverter
 {
-    private const GO_BINARY_PATH = '/usr/local/bin/excel_to_csv';
+    private const GO_BINARY_PATH = '/usr/local/bin/excel_streaming';
 
     /**
      * Convierte todas las hojas de un Excel a CSVs separados con columna sheet_name.
