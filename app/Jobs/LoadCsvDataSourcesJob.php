@@ -5,9 +5,7 @@ declare(strict_types=1);
 namespace App\Jobs;
 
 use App\Models\CollectionNoticeRun;
-use App\DTOs\Recaudo\SanitizedCsvResultDto;
-use App\Services\Recaudo\CsvSanitizerService;
-use App\Services\Recaudo\PostgreSQLCopyImporter;
+use App\Services\Recaudo\ResilientCsvImporter;
 use Illuminate\Bus\Batchable;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Filesystem\Factory as FilesystemFactory;
@@ -20,13 +18,17 @@ use RuntimeException;
 use Throwable;
 
 /**
- * Job OPTIMIZADO para cargar archivos CSV (BASCAR, BAPRPO, DATPOL) usando PostgreSQL COPY.
+ * Job RESILIENTE para cargar archivos CSV (BASCAR, BAPRPO, DATPOL) línea por línea.
  *
- * Este job se ejecuta en paralelo con otros jobs de carga.
- * Usa COPY FROM STDIN (10-50x más rápido que chunks).
+ * A diferencia del enfoque con PostgreSQL COPY (todo o nada), este job:
+ * - Procesa línea por línea en chunks de 1000 registros
+ * - Registra errores sin frenar el proceso
+ * - Guarda bitácora de líneas fallidas en csv_import_error_logs
+ * - Es resiliente ante caracteres escapados o separadores mal manejados
  *
- * Performance esperada:
- * - CSV 100MB: ~3s (vs ~30s con chunks de 5000)
+ * Performance esperada para 800k registros:
+ * - Tiempo: ~2-5 minutos (vs ~3s con COPY, pero más resiliente)
+ * - Sin fallos catastróficos por errores en líneas individuales
  */
 final class LoadCsvDataSourcesJob implements ShouldQueue
 {
@@ -38,13 +40,14 @@ final class LoadCsvDataSourcesJob implements ShouldQueue
 
     /**
      * Número de intentos del job.
+     * Solo 1 intento para evitar duplicación de datos.
      */
-    public int $tries = 2;
+    public int $tries = 1;
 
     /**
-     * Tiempo máximo de ejecución (5 minutos).
+     * Tiempo máximo de ejecución (4 horas para procesar múltiples CSVs grandes con seguridad).
      */
-    public int $timeout = 300;
+    public int $timeout = 14400;
 
     /**
      * Map de códigos a tablas PostgreSQL.
@@ -61,30 +64,46 @@ final class LoadCsvDataSourcesJob implements ShouldQueue
     public function __construct(
         private readonly int $runId
     ) {
-        $this->onQueue('csv-loading');
+        $this->onQueue('default');
     }
 
     /**
-     * Ejecuta el job de carga de CSV con PostgreSQL COPY.
+     * Ejecuta el job de carga de CSV de forma resiliente línea por línea.
      */
     public function handle(
         FilesystemFactory $filesystem,
-        PostgreSQLCopyImporter $importer,
-        CsvSanitizerService $csvSanitizer
+        ResilientCsvImporter $importer
     ): void {
         // Verificar si el batch fue cancelado
         if ($this->batch()?->cancelled()) {
             return;
         }
 
-        Log::info('🚀 Iniciando carga OPTIMIZADA de archivos CSV con PostgreSQL COPY', [
+        Log::info('🚀 Iniciando carga RESILIENTE de archivos CSV línea por línea', [
             'job' => self::class,
             'run_id' => $this->runId,
-            'method' => 'PostgreSQL COPY FROM STDIN',
+            'method' => 'Resilient Line-by-Line with Chunks',
         ]);
 
         try {
             $run = CollectionNoticeRun::with(['files.dataSource'])->findOrFail($this->runId);
+
+            // IDEMPOTENCIA: Limpiar tablas antes de insertar para evitar duplicados
+            // Esto garantiza que si el job se reintenta, no haya datos duplicados
+            Log::info('Limpiando tablas CSV para garantizar idempotencia', [
+                'run_id' => $this->runId,
+            ]);
+
+            foreach (self::TABLE_MAP as $tableName) {
+                $deleted = \DB::table($tableName)->where('run_id', $this->runId)->delete();
+                if ($deleted > 0) {
+                    Log::warning('Registros previos eliminados (idempotencia)', [
+                        'table' => $tableName,
+                        'run_id' => $this->runId,
+                        'deleted_rows' => $deleted,
+                    ]);
+                }
+            }
 
             $disk = $filesystem->disk('collection');
             $totalRowsLoaded = 0;
@@ -115,10 +134,9 @@ final class LoadCsvDataSourcesJob implements ShouldQueue
                 }
 
                 $csvPath = $disk->path($file->path);
-                $sanitizedResult = null;
                 $fileSize = $disk->size($file->path);
 
-                Log::info('📥 Cargando CSV con PostgreSQL COPY', [
+                Log::info('📥 Cargando CSV de forma resiliente', [
                     'run_id' => $run->id,
                     'data_source' => $dataSourceCode,
                     'table' => $tableName,
@@ -126,72 +144,62 @@ final class LoadCsvDataSourcesJob implements ShouldQueue
                     'size_mb' => round($fileSize / 1024 / 1024, 2),
                 ]);
 
-                // Determinar si se requiere sanitización previa
-                if ($csvSanitizer->supports($dataSourceCode)) {
-                    Log::info('🔄 Sanitizando CSV previo a COPY', [
-                        'run_id' => $run->id,
-                        'data_source' => $dataSourceCode,
-                        'job' => self::class,
-                    ]);
+                // NOTA: Sanitización deshabilitada para permitir importación de todas las columnas
+                // El ResilientCsvImporter maneja todos los casos de error sin necesidad de sanitización previa
 
-                    $sanitizedResult = $csvSanitizer->sanitize(
-                        $csvPath,
-                        (int) $run->id,
-                        $dataSourceCode
-                    );
-
-                    $csvPath = $sanitizedResult->path;
-                }
-
-                // Obtener columnas de la tabla (excluir id y created_at)
+                // Obtener columnas de la tabla (excluir id, run_id y created_at)
                 $columns = \DB::select(
                     "SELECT column_name
                      FROM information_schema.columns
                      WHERE table_name = ?
-                     AND column_name NOT IN ('id', 'created_at')
+                     AND column_name NOT IN ('id', 'run_id', 'created_at')
                      ORDER BY ordinal_position",
                     [$tableName]
                 );
                 $columns = array_column($columns, 'column_name');
 
-                try {
-                    // Usar PostgreSQL COPY FROM STDIN (10-50x más rápido)
-                    $result = $importer->importFromFile(
-                        $tableName,
-                        $csvPath,
-                        $columns,
-                        ';',
-                        true // hasHeader
-                    );
-                } finally {
-                    $this->cleanupTemporaryCsv($sanitizedResult);
-                }
+                // Usar ResilientCsvImporter (procesa línea por línea con chunks)
+                $result = $importer->importFromFile(
+                    $tableName,
+                    $csvPath,
+                    $columns,
+                    (int) $run->id,
+                    $dataSourceCode,
+                    ';',
+                    true // hasHeader
+                );
 
-                $totalRowsLoaded += $result['rows'];
+                $totalRowsLoaded += $result['success_rows'];
 
-                Log::info('✅ CSV cargado con COPY exitosamente', [
+                Log::info('✅ CSV cargado de forma resiliente', [
                     'run_id' => $run->id,
                     'data_source' => $dataSourceCode,
-                    'rows_imported' => $result['rows'],
+                    'total_rows' => $result['total_rows'],
+                    'success_rows' => $result['success_rows'],
+                    'error_rows' => $result['error_rows'],
+                    'errors_logged' => $result['errors_logged'],
                     'duration_ms' => $result['duration_ms'],
-                    'rows_per_second' => $result['duration_ms'] > 0
-                        ? round($result['rows'] / ($result['duration_ms'] / 1000))
-                        : 0,
+                    'success_rate' => $result['total_rows'] > 0
+                        ? round(($result['success_rows'] / $result['total_rows']) * 100, 2)
+                        : 100,
                 ]);
 
                 $filesLoaded[] = [
                     'data_source' => $dataSourceCode,
-                    'rows_count' => $result['rows'],
+                    'total_rows' => $result['total_rows'],
+                    'success_rows' => $result['success_rows'],
+                    'error_rows' => $result['error_rows'],
                     'duration_ms' => $result['duration_ms'],
                 ];
             }
 
-            Log::info('🎉 Carga OPTIMIZADA de CSV completada (PostgreSQL COPY)', [
+            Log::info('🎉 Carga RESILIENTE de CSV completada', [
                 'job' => self::class,
                 'run_id' => $run->id,
                 'files_loaded' => count($filesLoaded),
-                'total_rows' => $totalRowsLoaded,
-                'method' => 'COPY FROM STDIN',
+                'total_success_rows' => $totalRowsLoaded,
+                'files_summary' => $filesLoaded,
+                'method' => 'Resilient Line-by-Line with Chunks',
             ]);
         } catch (Throwable $exception) {
             Log::error('Error en carga de archivos CSV', [
@@ -215,16 +223,5 @@ final class LoadCsvDataSourcesJob implements ShouldQueue
             'run_id' => $this->runId,
             'error' => $exception->getMessage(),
         ]);
-    }
-
-    private function cleanupTemporaryCsv(?SanitizedCsvResultDto $sanitizedResult): void
-    {
-        if ($sanitizedResult === null) {
-            return;
-        }
-
-        if ($sanitizedResult->temporary && file_exists($sanitizedResult->path)) {
-            @unlink($sanitizedResult->path);
-        }
     }
 }

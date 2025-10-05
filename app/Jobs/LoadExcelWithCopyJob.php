@@ -38,8 +38,15 @@ class LoadExcelWithCopyJob implements ShouldQueue
     use Queueable;
     use SerializesModels;
 
-    public int $timeout = 1800; // 30 minutos
-    public int $tries = 2;
+    /**
+     * Tiempo máximo de ejecución (60 minutos para archivos Excel grandes).
+     */
+    public int $timeout = 3600;
+
+    /**
+     * Solo 1 intento para evitar duplicación de datos.
+     */
+    public int $tries = 1;
 
     private const TABLE_MAP = [
         'BASCAR' => 'data_source_bascar',
@@ -54,7 +61,7 @@ class LoadExcelWithCopyJob implements ShouldQueue
         private readonly int $fileId,
         private readonly string $dataSourceCode
     ) {
-        $this->onQueue('collection-notices');
+        $this->onQueue('default');
     }
 
     public function handle(
@@ -78,15 +85,30 @@ class LoadExcelWithCopyJob implements ShouldQueue
             throw new \RuntimeException("Data source no soportado: {$this->dataSourceCode}");
         }
 
-        Log::info('🚀 Iniciando carga ULTRA-OPTIMIZADA Excel → Go → PostgreSQL COPY', [
-            'file_id' => $this->fileId,
-            'run_id' => $runId,
-            'data_source' => $this->dataSourceCode,
+        Log::info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        Log::info('🚀 INICIANDO IMPORTACIÓN EXCEL');
+        Log::info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        Log::info('📊 Data Source: ' . $this->dataSourceCode);
+        Log::info('📁 Archivo: ' . basename($file->path));
+        Log::info('💾 Tamaño: ' . round($file->size / 1024 / 1024, 2) . ' MB');
+        Log::info('🎯 Tabla destino: ' . $tableName);
+        Log::info('⚙️  Método: Go Excelize → PostgreSQL COPY');
+        Log::info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+        // IDEMPOTENCIA: Limpiar tabla antes de insertar para evitar duplicados
+        Log::info('Limpiando tabla Excel para garantizar idempotencia', [
             'table' => $tableName,
-            'file_path' => $file->path,
-            'size_mb' => round($file->size / 1024 / 1024, 2),
-            'method' => 'Go excelize + PostgreSQL COPY FROM STDIN',
+            'run_id' => $runId,
         ]);
+
+        $deleted = DB::table($tableName)->where('run_id', $runId)->delete();
+        if ($deleted > 0) {
+            Log::warning('Registros previos eliminados (idempotencia)', [
+                'table' => $tableName,
+                'run_id' => $runId,
+                'deleted_rows' => $deleted,
+            ]);
+        }
 
         $disk = $filesystem->disk($file->disk);
         $tempDir = 'temp/excel_import_' . $this->fileId;
@@ -100,21 +122,19 @@ class LoadExcelWithCopyJob implements ShouldQueue
                 $tempDir
             );
 
-            Log::info('✅ Excel convertido a CSVs con Go', [
-                'file_id' => $this->fileId,
-                'total_sheets' => count($conversionResult['sheets']),
-                'sheets' => array_keys($conversionResult['sheets']),
-            ]);
+            Log::info('');
+            Log::info('✅ CONVERSIÓN EXCEL → CSV COMPLETADA');
+            Log::info('📋 Total de hojas: ' . count($conversionResult['sheets']));
+            Log::info('📄 Hojas procesadas: ' . implode(', ', array_keys($conversionResult['sheets'])));
+            Log::info('');
 
             // Paso 2: Obtener columnas de la tabla destino (excluir id y created_at)
             $columns = $this->getTableColumns($tableName);
 
             // Paso 3: Importar cada CSV con COPY FROM STDIN (10-50x más rápido)
-            Log::info('Iniciando importación OPTIMIZADA con PostgreSQL COPY', [
-                'file_id' => $this->fileId,
-                'total_sheets' => count($conversionResult['sheets']),
-                'method' => 'COPY FROM STDIN',
-            ]);
+            Log::info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+            Log::info('⬆️  INICIANDO IMPORTACIÓN A BASE DE DATOS');
+            Log::info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
             $totalRowsImported = 0;
 
@@ -122,60 +142,52 @@ class LoadExcelWithCopyJob implements ShouldQueue
                 $csvPath = $disk->path($sheetInfo['path']);
                 $csvPaths[] = $csvPath;
 
-                Log::info('Importando hoja con PostgreSQL COPY', [
-                    'sheet_name' => $sheetName,
-                    'csv_path' => $csvPath,
-                    'expected_rows' => $sheetInfo['rows'],
-                    'file_size_mb' => round($sheetInfo['size'] / 1024 / 1024, 2),
-                ]);
+                Log::info('');
+                Log::info('📄 Procesando hoja: ' . $sheetName);
+                Log::info('   ├─ Filas esperadas: ' . number_format($sheetInfo['rows']));
+                Log::info('   └─ Tamaño: ' . round($sheetInfo['size'] / 1024 / 1024, 2) . ' MB');
 
-                // Usar COPY FROM STDIN - mucho más rápido que chunks
+                // Paso 1: Normalizar CSV para que tenga todas las columnas de la tabla
+                $normalizedCsv = $this->normalizeCSV($csvPath, $columns, ';');
+                $csvPaths[] = $normalizedCsv;
+
+                // Paso 2: Agregar run_id al CSV normalizado
+                $csvWithRunId = $this->addRunIdToCSV($normalizedCsv, $runId);
+                $csvPaths[] = $csvWithRunId;
+
+                // Paso 3: Agregar run_id a las columnas
+                $columnsWithRunId = array_merge(['run_id'], $columns);
+
+                // Paso 4: Usar COPY FROM STDIN - mucho más rápido que chunks
                 $result = $importer->importFromFile(
                     $tableName,
-                    $csvPath,
-                    $columns,
+                    $csvWithRunId,
+                    $columnsWithRunId,
                     ';',
                     true // hasHeader
                 );
 
                 $totalRowsImported += $result['rows'];
 
-                Log::info('Hoja importada exitosamente con COPY', [
-                    'sheet_name' => $sheetName,
-                    'rows_imported' => $result['rows'],
-                    'duration_ms' => $result['duration_ms'],
-                    'rows_per_second' => $result['duration_ms'] > 0
-                        ? round($result['rows'] / ($result['duration_ms'] / 1000))
-                        : 0,
-                ]);
+                $rowsPerSecond = $result['duration_ms'] > 0
+                    ? round($result['rows'] / ($result['duration_ms'] / 1000))
+                    : 0;
+
+                Log::info('   ✅ Importación completada');
+                Log::info('   ├─ Registros: ' . number_format($result['rows']));
+                Log::info('   ├─ Duración: ' . round($result['duration_ms'] / 1000, 2) . 's');
+                Log::info('   └─ Velocidad: ' . number_format($rowsPerSecond) . ' filas/seg');
             }
 
-            Log::info('Todas las hojas importadas con COPY', [
-                'file_id' => $this->fileId,
-                'total_rows' => $totalRowsImported,
-                'total_sheets' => count($conversionResult['sheets']),
-            ]);
-
-            // Paso 4: Actualizar metadata del archivo
-            $file->update([
-                'metadata' => array_merge($file->metadata ?? [], [
-                    'loaded_with_copy' => true,
-                    'converter' => 'Go excelize',
-                    'total_sheets' => count($conversionResult['sheets']),
-                    'total_rows_imported' => $totalRowsImported,
-                    'sheets' => array_keys($conversionResult['sheets']),
-                    'loaded_at' => now()->toIso8601String(),
-                    'import_method' => 'Go + PostgreSQL COPY FROM STDIN',
-                ]),
-            ]);
-
-            Log::info('🎉 Carga ULTRA-OPTIMIZADA completada (Go + COPY)', [
-                'file_id' => $this->fileId,
-                'run_id' => $runId,
-                'total_sheets' => count($conversionResult['sheets']),
-                'total_rows' => $totalRowsImported,
-                'method' => 'Go excelize + COPY FROM STDIN',
-            ]);
+            Log::info('');
+            Log::info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+            Log::info('🎉 IMPORTACIÓN EXCEL COMPLETADA EXITOSAMENTE');
+            Log::info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+            Log::info('📊 Total de hojas: ' . count($conversionResult['sheets']));
+            Log::info('📈 Total de registros: ' . number_format($totalRowsImported));
+            Log::info('✅ Data Source: ' . $this->dataSourceCode);
+            Log::info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+            Log::info('');
 
         } catch (Throwable $exception) {
             Log::error('Error en carga optimizada Excel → COPY', [
@@ -209,6 +221,7 @@ class LoadExcelWithCopyJob implements ShouldQueue
 
     /**
      * Obtiene las columnas de una tabla para el COPY.
+     * Excluye id, run_id y created_at porque se manejan por separado.
      */
     private function getTableColumns(string $tableName): array
     {
@@ -216,12 +229,103 @@ class LoadExcelWithCopyJob implements ShouldQueue
             "SELECT column_name
              FROM information_schema.columns
              WHERE table_name = ?
-             AND column_name NOT IN ('id', 'created_at')
+             AND column_name NOT IN ('id', 'run_id', 'created_at')
              ORDER BY ordinal_position",
             [$tableName]
         );
 
         return array_column($columns, 'column_name');
+    }
+
+    /**
+     * Normaliza un CSV para que tenga todas las columnas esperadas.
+     * Agrega columnas faltantes con valores vacíos.
+     *
+     * Usa split manual por delimitador en lugar de str_getcsv para evitar
+     * problemas con comillas escapadas.
+     *
+     * @param string $csvPath Ruta al CSV original
+     * @param array $expectedColumns Lista de columnas esperadas (sin run_id)
+     * @param string $delimiter Delimitador del CSV
+     * @return string Ruta al CSV normalizado
+     */
+    private function normalizeCSV(
+        string $csvPath,
+        array $expectedColumns,
+        string $delimiter = ';'
+    ): string {
+        $outputPath = $csvPath . '.normalized.csv';
+        $input = fopen($csvPath, 'r');
+        $output = fopen($outputPath, 'w');
+
+        // Leer header del CSV y splitear por delimitador
+        $headerLine = fgets($input);
+        $csvHeaders = explode($delimiter, trim($headerLine));
+
+        // Normalizar headers a minúsculas para comparación case-insensitive
+        $csvHeadersLower = array_map('strtolower', $csvHeaders);
+        $expectedColumnsLower = array_map('strtolower', $expectedColumns);
+
+        // Crear mapeo de índices: para cada columna esperada, encontrar su índice en el CSV
+        $columnMapping = [];
+        foreach ($expectedColumns as $i => $expectedCol) {
+            $expectedColLower = $expectedColumnsLower[$i];
+            $index = array_search($expectedColLower, $csvHeadersLower);
+            $columnMapping[$expectedCol] = $index !== false ? $index : null;
+        }
+
+        // Escribir header normalizado
+        fwrite($output, implode($delimiter, $expectedColumns) . "\n");
+
+        // Procesar cada línea de datos
+        while (($line = fgets($input)) !== false) {
+            // Split manual por delimitador (más robusto que str_getcsv)
+            $data = explode($delimiter, trim($line));
+            $normalizedRow = [];
+
+            foreach ($expectedColumns as $col) {
+                $sourceIndex = $columnMapping[$col];
+                if ($sourceIndex !== null && isset($data[$sourceIndex])) {
+                    $normalizedRow[] = $data[$sourceIndex];
+                } else {
+                    $normalizedRow[] = ''; // Valor vacío para columnas faltantes
+                }
+            }
+
+            fwrite($output, implode($delimiter, $normalizedRow) . "\n");
+        }
+
+        fclose($input);
+        fclose($output);
+
+        return $outputPath;
+    }
+
+    /**
+     * Agrega run_id al inicio de cada línea del CSV.
+     */
+    private function addRunIdToCSV(string $csvPath, int $runId): string
+    {
+        $outputPath = $csvPath . '.with_run_id.csv';
+        $input = fopen($csvPath, 'r');
+        $output = fopen($outputPath, 'w');
+
+        $isFirstLine = true;
+        while (($line = fgets($input)) !== false) {
+            if ($isFirstLine) {
+                // Agregar "run_id" al header
+                fwrite($output, 'run_id;' . $line);
+                $isFirstLine = false;
+            } else {
+                // Agregar el run_id al inicio de cada línea
+                fwrite($output, $runId . ';' . $line);
+            }
+        }
+
+        fclose($input);
+        fclose($output);
+
+        return $outputPath;
     }
 
     public function failed(Throwable $exception): void

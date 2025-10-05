@@ -52,7 +52,7 @@ final class ProcessCollectionDataJob implements ShouldQueue
     public function __construct(
         private readonly int $runId
     ) {
-        $this->onQueue('processing');
+        $this->onQueue('default');
     }
 
     /**
