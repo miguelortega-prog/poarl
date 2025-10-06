@@ -5,122 +5,99 @@ declare(strict_types=1);
 namespace App\UseCases\Recaudo\Comunicados\Steps;
 
 use App\Contracts\Recaudo\Comunicados\ProcessingStepInterface;
-use App\DTOs\Recaudo\Comunicados\ProcessingContextDto;
+use App\Models\CollectionNoticeRun;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use RuntimeException;
 
 /**
- * Paso para eliminar de BASCAR los registros que cruzaron con PAGAPL.
+ * Step: Eliminar de BASCAR los registros que cruzaron con PAGAPL.
  *
- * Los registros que cruzaron con PAGAPL fueron guardados en el CSV de excluidos.
- * Este paso elimina esos registros de la tabla staging de BASCAR para dejar solo
- * los registros que NO cruzaron y que continuarán en el flujo de procesamiento.
+ * Los aportantes que cruzaron con PAGAPL (que ya pagaron) fueron guardados
+ * en el archivo excluidos{run_id}.csv en el paso anterior.
+ *
+ * Este paso los elimina físicamente de la tabla data_source_bascar para dejar
+ * solo los aportantes morosos que continuarán en el flujo de procesamiento.
+ *
+ * Operación SQL:
+ * DELETE FROM data_source_bascar
+ * WHERE run_id = X
+ *   AND EXISTS (
+ *     SELECT 1 FROM data_source_pagapl
+ *     WHERE composite_key = data_source_bascar.composite_key
+ *       AND run_id = X
+ *   )
  */
-final readonly class RemoveCrossedBascarRecordsStep implements ProcessingStepInterface
+final class RemoveCrossedBascarRecordsStep implements ProcessingStepInterface
 {
-    private const BASCAR_CODE = 'BASCAR';
-    private const PAGAPL_CODE = 'PAGAPL';
-
-    /**
-     * @param ProcessingContextDto $context
-     *
-     * @return ProcessingContextDto
-     */
-    public function execute(ProcessingContextDto $context): ProcessingContextDto
-    {
-        $run = $context->run;
-        $bascarData = $context->getData(self::BASCAR_CODE);
-        $pagaplData = $context->getData(self::PAGAPL_CODE);
-
-        if ($bascarData === null) {
-            throw new RuntimeException('No se encontró el archivo BASCAR en el contexto');
-        }
-
-        if ($pagaplData === null) {
-            throw new RuntimeException('No se encontró el archivo PAGAPL en el contexto');
-        }
-
-        if (!($bascarData['loaded_to_db'] ?? false)) {
-            throw new RuntimeException('BASCAR no está cargado en la base de datos');
-        }
-
-        if (!($pagaplData['loaded_to_db'] ?? false)) {
-            throw new RuntimeException('PAGAPL no está cargado en la base de datos');
-        }
-
-        $bascarTable = "ds_bascar_run_{$run->id}";
-        $pagaplTable = "ds_pagapl_run_{$run->id}";
-
-        Log::info('Eliminando registros de BASCAR que cruzaron con PAGAPL', [
-            'run_id' => $run->id,
-            'bascar_table' => $bascarTable,
-            'pagapl_table' => $pagaplTable,
-        ]);
-
-        // Contar registros antes de la eliminación
-        $countBefore = DB::table($bascarTable)->count();
-
-        // Eliminar registros de BASCAR que cruzan con PAGAPL
-        // Cruce por: NUMERO_ID_APORTANTE y PERIODO
-        $deletedCount = DB::table($bascarTable)
-            ->whereExists(function ($query) use ($pagaplTable, $bascarTable) {
-                $query->select(DB::raw(1))
-                    ->from($pagaplTable)
-                    ->whereColumn("{$pagaplTable}.NUMERO_ID_APORTANTE", '=', "{$bascarTable}.NUMERO_ID_APORTANTE")
-                    ->whereColumn("{$pagaplTable}.PERIODO", '=', "{$bascarTable}.PERIODO");
-            })
-            ->delete();
-
-        $countAfter = DB::table($bascarTable)->count();
-
-        Log::info('Registros de BASCAR eliminados exitosamente', [
-            'run_id' => $run->id,
-            'registros_antes' => $countBefore,
-            'registros_eliminados' => $deletedCount,
-            'registros_restantes' => $countAfter,
-        ]);
-
-        // Actualizar datos de BASCAR en el contexto
-        return $context->addData(self::BASCAR_CODE, [
-            ...$bascarData,
-            'crossed_records_removed' => true,
-            'rows_before_removal' => $countBefore,
-            'rows_removed' => $deletedCount,
-            'rows_remaining' => $countAfter,
-        ])->addStepResult($this->getName(), [
-            'registros_antes' => $countBefore,
-            'registros_eliminados' => $deletedCount,
-            'registros_restantes' => $countAfter,
-        ]);
-    }
-
-    /**
-     * @return string
-     */
     public function getName(): string
     {
         return 'Eliminar registros de BASCAR que cruzaron con PAGAPL';
     }
 
-    /**
-     * @param ProcessingContextDto $context
-     *
-     * @return bool
-     */
-    public function shouldExecute(ProcessingContextDto $context): bool
+    public function execute(CollectionNoticeRun $run): void
     {
-        // Solo ejecutar si BASCAR y PAGAPL están cargados a BD
-        // y el cruce ya fue realizado
-        $bascarData = $context->getData(self::BASCAR_CODE);
-        $pagaplData = $context->getData(self::PAGAPL_CODE);
+        $startTime = microtime(true);
+        $tableName = 'data_source_bascar';
 
-        return $bascarData !== null
-            && $pagaplData !== null
-            && ($bascarData['loaded_to_db'] ?? false)
-            && ($pagaplData['loaded_to_db'] ?? false)
-            && ($bascarData['crossed_with_pagapl'] ?? false)
-            && !($bascarData['crossed_records_removed'] ?? false);
+        Log::info('🗑️  Eliminando de BASCAR registros que cruzaron con PAGAPL', [
+            'step' => self::class,
+            'run_id' => $run->id,
+        ]);
+
+        // Contar registros antes de la eliminación
+        $countBefore = DB::table($tableName)
+            ->where('run_id', $run->id)
+            ->count();
+
+        Log::info('Registros en BASCAR antes de eliminar', [
+            'run_id' => $run->id,
+            'count_before' => $countBefore,
+        ]);
+
+        // Eliminar registros que tienen composite_key en PAGAPL
+        $deleted = DB::delete("
+            DELETE FROM {$tableName}
+            WHERE run_id = ?
+                AND EXISTS (
+                    SELECT 1
+                    FROM data_source_pagapl p
+                    WHERE p.composite_key = {$tableName}.composite_key
+                        AND p.run_id = ?
+                )
+        ", [$run->id, $run->id]);
+
+        // Contar registros después de la eliminación
+        $countAfter = DB::table($tableName)
+            ->where('run_id', $run->id)
+            ->count();
+
+        $duration = (int) ((microtime(true) - $startTime) * 1000);
+
+        Log::info('✅ Registros eliminados de BASCAR', [
+            'run_id' => $run->id,
+            'count_before' => $countBefore,
+            'deleted' => $deleted,
+            'count_after' => $countAfter,
+            'duration_ms' => $duration,
+        ]);
+
+        // Validar consistencia
+        if ($countBefore - $deleted !== $countAfter) {
+            Log::warning('⚠️  Inconsistencia en conteo de eliminación', [
+                'run_id' => $run->id,
+                'count_before' => $countBefore,
+                'deleted' => $deleted,
+                'count_after' => $countAfter,
+                'expected_after' => $countBefore - $deleted,
+            ]);
+        }
+
+        // Validar que quedaron registros para procesar
+        if ($countAfter === 0) {
+            Log::warning('⚠️  No quedaron registros en BASCAR después de eliminar cruzados', [
+                'run_id' => $run->id,
+                'deleted' => $deleted,
+            ]);
+        }
     }
-
 }

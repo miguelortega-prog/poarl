@@ -10,8 +10,10 @@ use App\Services\Recaudo\DataSourceTableManager;
 use App\UseCases\Recaudo\Comunicados\Steps\CountDettraWorkersAndUpdateBascarStep;
 use App\UseCases\Recaudo\Comunicados\Steps\CrossBascarWithPagaplStep;
 use App\UseCases\Recaudo\Comunicados\Steps\FilterBascarByPeriodStep;
+use App\UseCases\Recaudo\Comunicados\Steps\FilterDataByPeriodStep;
 use App\UseCases\Recaudo\Comunicados\Steps\GenerateBascarCompositeKeyStep;
 use App\UseCases\Recaudo\Comunicados\Steps\GeneratePagaplCompositeKeyStep;
+use App\UseCases\Recaudo\Comunicados\Steps\IdentifyPsiStep;
 use App\UseCases\Recaudo\Comunicados\Steps\RemoveCrossedBascarRecordsStep;
 use App\UseCases\Recaudo\Comunicados\Steps\ValidateDataIntegrityStep;
 use Illuminate\Contracts\Filesystem\Factory as FilesystemFactory;
@@ -42,11 +44,13 @@ final class ConstitucionMoraAportantesProcessor extends BaseCollectionNoticeProc
         DataSourceTableManager $tableManager,
         FilesystemFactory $filesystem,
         private readonly ValidateDataIntegrityStep $validateDataStep,
+        private readonly FilterDataByPeriodStep $filterDataByPeriodStep,
         private readonly FilterBascarByPeriodStep $filterBascarStep,
         private readonly GenerateBascarCompositeKeyStep $generateBascarKeysStep,
         private readonly GeneratePagaplCompositeKeyStep $generatePagaplKeysStep,
         private readonly CrossBascarWithPagaplStep $crossBascarPagaplStep,
         private readonly RemoveCrossedBascarRecordsStep $removeCrossedBascarStep,
+        private readonly IdentifyPsiStep $identifyPsiStep,
         private readonly CountDettraWorkersAndUpdateBascarStep $countDettraWorkersStep,
     ) {
         parent::__construct($tableManager, $filesystem);
@@ -110,10 +114,14 @@ final class ConstitucionMoraAportantesProcessor extends BaseCollectionNoticeProc
             // - DETTRA, PAGAPL, PAGPLA (LoadExcelWithCopyJob)
             $this->validateDataStep,
 
-            // === FASE 2: TRANSFORMACIÓN Y CRUCE DE DATOS SQL ===
+            // === FASE 2: FILTRADO DE DATOS POR PERIODO ===
 
-            // Paso 2: TODO - Depurar tablas (eliminar registros que no se usarán)
-            // PENDIENTE DE IMPLEMENTAR
+            // Paso 2: Filtrar datos por periodo del run
+            // - Si periodo = "Todos Los Periodos": No filtra nada
+            // - Si periodo = YYYYMM: Filtra DETTRA por FECHA_INICIO_VIG
+            $this->filterDataByPeriodStep,
+
+            // === FASE 3: TRANSFORMACIÓN Y CRUCE DE DATOS SQL ===
 
             // Paso 3: Generar llaves compuestas en BASCAR (SQL UPDATE)
             $this->generateBascarKeysStep,
@@ -127,7 +135,9 @@ final class ConstitucionMoraAportantesProcessor extends BaseCollectionNoticeProc
             // Paso 6: Eliminar de BASCAR los registros que cruzaron con PAGAPL (SQL DELETE)
             $this->removeCrossedBascarStep,
 
-            // Paso 7: TODO - Nuevo cruce (pendiente definición de reglas)
+            // Paso 7: Identificar PSI (Póliza de Seguro Independiente)
+            // Cruza BASCAR.nit con BAPRPO.nit para obtener pol_independiente
+            $this->identifyPsiStep,
 
             // Paso 8: Contar trabajadores de DETTRA y actualizar BASCAR (SQL UPDATE)
             $this->countDettraWorkersStep,
