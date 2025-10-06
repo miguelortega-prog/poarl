@@ -14,37 +14,23 @@ use Illuminate\Support\Facades\Log;
  *
  * Cruza BASCAR con BAPRPO para identificar si el aportante tiene póliza independiente:
  * 1. Crea columna 'psi' en data_source_bascar
- * 2. Crea índices en NIT (BASCAR) y nit (BAPRPO)
- * 3. Actualiza BASCAR.psi con BAPRPO.pol_independiente donde NIT coincide
+ * 2. Crea índices en NUM_TOMADOR (BASCAR) y tomador (BAPRPO)
+ * 3. Actualiza BASCAR.psi con BAPRPO.pol_independiente donde coinciden
  *
- * TODO: VALIDAR NOMBRES DE COLUMNAS CON EL CLIENTE
- * ====================================================
- * Los nombres de columnas usados en este cruce NO CORRESPONDEN con las columnas
- * reales de las tablas. Necesitamos confirmar:
+ * Mapeo de columnas (validado con cliente):
+ * - BASCAR: Campo NIT -> NUM_TOMADOR
+ * - BAPRPO: Campo NIT -> tomador
+ * - BAPRPO: Campo PSI -> pol_independiente
  *
- * BASCAR:
- * - ¿Campo NIT existe? ¿O es otro nombre? (NUM_TOMADOR, NUMERO_IDENTIFICACION, etc)
- *
- * BAPRPO:
- * - ¿Campo 'nit' existe en minúsculas?
- * - ¿Campo 'pol_independiente' existe? ¿O es POL_INDEPENDIENTE en mayúsculas?
- *
- * ACCIÓN REQUERIDA:
- * 1. Verificar estructura real de data_source_bascar (columnas disponibles)
- * 2. Verificar estructura real de data_source_baprpo (columnas disponibles)
- * 3. Actualizar el cruce con los nombres correctos
- *
- * Cruce TENTATIVO (puede estar incorrecto):
- * - BASCAR.nit = BAPRPO.nit
- * - Actualiza: BASCAR.psi = BAPRPO.pol_independiente
- *
- * Operación SQL:
+ * Cruce SQL:
  * UPDATE data_source_bascar b
  * SET psi = baprpo.pol_independiente
  * FROM data_source_baprpo baprpo
- * WHERE b.nit = baprpo.nit
+ * WHERE b.NUM_TOMADOR = baprpo.tomador
  *   AND b.run_id = X
  *   AND baprpo.run_id = X
+ *   AND b.NUM_TOMADOR IS NOT NULL
+ *   AND baprpo.tomador IS NOT NULL
  */
 final class IdentifyPsiStep implements ProcessingStepInterface
 {
@@ -114,32 +100,32 @@ final class IdentifyPsiStep implements ProcessingStepInterface
     }
 
     /**
-     * Asegura que existan índices en las columnas NIT de ambas tablas.
+     * Asegura que existan índices en las columnas de identificación de ambas tablas.
      */
     private function ensureNitIndexes(): void
     {
-        // Índice en BASCAR.nit
-        if (!$this->indexExists('data_source_bascar', 'idx_data_source_bascar_nit')) {
-            Log::info('Creando índice en BASCAR.nit');
+        // Índice en BASCAR.NUM_TOMADOR
+        if (!$this->indexExists('data_source_bascar', 'idx_data_source_bascar_num_tomador')) {
+            Log::info('Creando índice en BASCAR.NUM_TOMADOR');
 
             DB::statement("
-                CREATE INDEX IF NOT EXISTS idx_data_source_bascar_nit
-                ON data_source_bascar(nit)
+                CREATE INDEX IF NOT EXISTS idx_data_source_bascar_num_tomador
+                ON data_source_bascar(NUM_TOMADOR)
             ");
 
-            Log::info('✅ Índice creado en BASCAR.nit');
+            Log::info('✅ Índice creado en BASCAR.NUM_TOMADOR');
         }
 
-        // Índice en BAPRPO.nit
-        if (!$this->indexExists('data_source_baprpo', 'idx_data_source_baprpo_nit')) {
-            Log::info('Creando índice en BAPRPO.nit');
+        // Índice en BAPRPO.tomador
+        if (!$this->indexExists('data_source_baprpo', 'idx_data_source_baprpo_tomador')) {
+            Log::info('Creando índice en BAPRPO.tomador');
 
             DB::statement("
-                CREATE INDEX IF NOT EXISTS idx_data_source_baprpo_nit
-                ON data_source_baprpo(nit)
+                CREATE INDEX IF NOT EXISTS idx_data_source_baprpo_tomador
+                ON data_source_baprpo(tomador)
             ");
 
-            Log::info('✅ Índice creado en BAPRPO.nit');
+            Log::info('✅ Índice creado en BAPRPO.tomador');
         }
     }
 
@@ -162,13 +148,13 @@ final class IdentifyPsiStep implements ProcessingStepInterface
             UPDATE data_source_bascar b
             SET psi = baprpo.pol_independiente
             FROM data_source_baprpo baprpo
-            WHERE b.nit = baprpo.nit
+            WHERE b.NUM_TOMADOR = baprpo.tomador
                 AND b.run_id = ?
                 AND baprpo.run_id = ?
-                AND b.nit IS NOT NULL
-                AND b.nit != ''
-                AND baprpo.nit IS NOT NULL
-                AND baprpo.nit != ''
+                AND b.NUM_TOMADOR IS NOT NULL
+                AND b.NUM_TOMADOR != ''
+                AND baprpo.tomador IS NOT NULL
+                AND baprpo.tomador != ''
         ", [$run->id, $run->id]);
 
         // Contar registros con PSI poblado

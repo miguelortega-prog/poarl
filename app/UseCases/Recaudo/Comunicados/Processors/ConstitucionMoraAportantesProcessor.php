@@ -8,7 +8,9 @@ use App\Models\CollectionNoticeRun;
 use App\Services\Recaudo\Comunicados\BaseCollectionNoticeProcessor;
 use App\Services\Recaudo\DataSourceTableManager;
 use App\UseCases\Recaudo\Comunicados\Steps\CountDettraWorkersAndUpdateBascarStep;
+use App\UseCases\Recaudo\Comunicados\Steps\CrearBaseTrabajadoresActivosStep;
 use App\UseCases\Recaudo\Comunicados\Steps\CrossBascarWithPagaplStep;
+use App\UseCases\Recaudo\Comunicados\Steps\ExcludePsiPersonaJuridicaStep;
 use App\UseCases\Recaudo\Comunicados\Steps\FilterBascarByPeriodStep;
 use App\UseCases\Recaudo\Comunicados\Steps\FilterDataByPeriodStep;
 use App\UseCases\Recaudo\Comunicados\Steps\GenerateBascarCompositeKeyStep;
@@ -51,7 +53,9 @@ final class ConstitucionMoraAportantesProcessor extends BaseCollectionNoticeProc
         private readonly CrossBascarWithPagaplStep $crossBascarPagaplStep,
         private readonly RemoveCrossedBascarRecordsStep $removeCrossedBascarStep,
         private readonly IdentifyPsiStep $identifyPsiStep,
+        private readonly ExcludePsiPersonaJuridicaStep $excludePsiPersonaJuridicaStep,
         private readonly CountDettraWorkersAndUpdateBascarStep $countDettraWorkersStep,
+        private readonly CrearBaseTrabajadoresActivosStep $crearBaseTrabajadoresActivosStep,
     ) {
         parent::__construct($tableManager, $filesystem);
         $this->initializeSteps();
@@ -136,11 +140,21 @@ final class ConstitucionMoraAportantesProcessor extends BaseCollectionNoticeProc
             $this->removeCrossedBascarStep,
 
             // Paso 7: Identificar PSI (Póliza de Seguro Independiente)
-            // Cruza BASCAR.nit con BAPRPO.nit para obtener pol_independiente
+            // Cruza BASCAR.NUM_TOMADOR con BAPRPO.tomador para obtener pol_independiente
             $this->identifyPsiStep,
 
-            // Paso 8: Contar trabajadores de DETTRA y actualizar BASCAR (SQL UPDATE)
+            // Paso 8: Excluir PSI Persona Jurídica (9 dígitos)
+            // Excluye registros con PSI='S' y NUM_TOMADOR de 9 dígitos
+            // Los agrega al archivo de excluidos y los elimina de BASCAR
+            $this->excludePsiPersonaJuridicaStep,
+
+            // Paso 9: Contar trabajadores de DETTRA y actualizar BASCAR (SQL UPDATE)
             $this->countDettraWorkersStep,
+
+            // Paso 10: Crear base de trabajadores activos (CSV detalle)
+            // Cruza DETTRA.NRO_DOCUMTO con BASCAR.NUM_TOMADOR
+            // Genera archivo detalle_trabajadores{run_id}.csv
+            $this->crearBaseTrabajadoresActivosStep,
 
             // TODO: Pasos subsecuentes pendientes de definición
         ];
