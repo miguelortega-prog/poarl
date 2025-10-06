@@ -36,6 +36,17 @@ type Cell struct {
 	V string `xml:"v"`      // Valor
 }
 
+type Workbook struct {
+	XMLName xml.Name `xml:"workbook"`
+	Sheets  struct {
+		Sheet []struct {
+			Name    string `xml:"name,attr"`
+			SheetID string `xml:"sheetId,attr"`
+			RID     string `xml:"http://schemas.openxmlformats.org/officeDocument/2006/relationships id,attr"`
+		} `xml:"sheet"`
+	} `xml:"sheets"`
+}
+
 type SheetResult struct {
 	Name     string `json:"name"`
 	Path     string `json:"path"`
@@ -93,6 +104,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Cargar nombres de hojas desde workbook.xml
+	sheetNames, err := loadSheetNames(&zipReader.Reader)
+	if err != nil {
+		result.Success = false
+		result.Error = fmt.Sprintf("Error loading sheet names: %v", err)
+		outputJSON(result)
+		os.Exit(1)
+	}
+
 	totalRows := 0
 
 	// Procesar cada hoja
@@ -101,7 +121,16 @@ func main() {
 			continue
 		}
 
-		sheetName := strings.TrimSuffix(strings.TrimPrefix(file.Name, "xl/worksheets/"), ".xml")
+		// Extraer sheet ID del nombre del archivo (sheet1.xml → 1)
+		sheetFilename := strings.TrimSuffix(strings.TrimPrefix(file.Name, "xl/worksheets/"), ".xml")
+		sheetID := strings.TrimPrefix(sheetFilename, "sheet")
+
+		// Obtener nombre real de la hoja desde workbook.xml
+		sheetName := sheetNames[sheetID]
+		if sheetName == "" {
+			sheetName = sheetFilename // Fallback al nombre del archivo si no se encuentra
+		}
+
 		sheetStart := time.Now()
 
 		csvPath := filepath.Join(*output, sheetName+".csv")
@@ -192,6 +221,35 @@ func loadSharedStrings(zipReader *zip.Reader) ([]string, error) {
 		}
 	}
 	return []string{}, nil
+}
+
+func loadSheetNames(zipReader *zip.Reader) (map[string]string, error) {
+	// Buscar workbook.xml
+	for _, file := range zipReader.File {
+		if file.Name == "xl/workbook.xml" {
+			rc, err := file.Open()
+			if err != nil {
+				return nil, err
+			}
+			defer rc.Close()
+
+			var workbook Workbook
+			decoder := xml.NewDecoder(rc)
+			if err := decoder.Decode(&workbook); err != nil {
+				return nil, err
+			}
+
+			// Crear mapa de sheet ID → nombre
+			sheetMap := make(map[string]string)
+			for _, sheet := range workbook.Sheets.Sheet {
+				sheetMap[sheet.SheetID] = sheet.Name
+			}
+
+			return sheetMap, nil
+		}
+	}
+
+	return make(map[string]string), nil
 }
 
 func processSheetStreaming(zipFile *zip.File, writer *csv.Writer, sharedStrings []string, sheetName string) (int, error) {

@@ -186,11 +186,11 @@ final class ResilientCsvImporter
     }
 
     /**
-     * Procesa un chunk de líneas usando transacciones individuales por línea
-     * para evitar problemas con transacciones abortadas en PostgreSQL.
+     * Procesa un chunk de líneas usando batch insert.
      *
-     * Cada línea se procesa en su propia transacción, garantizando que
-     * los errores en una línea no afecten a las demás.
+     * Intenta insertar todo el chunk en una transacción.
+     * Si falla, hace fallback a inserción línea por línea para identificar
+     * qué filas específicas tienen errores.
      *
      * @param string $tableName
      * @param array $chunk
@@ -209,10 +209,35 @@ final class ResilientCsvImporter
         $errors = 0;
         $errorsLogged = 0;
 
-        // Procesar línea por línea con transacción individual para cada una
-        // Esto evita que una transacción abortada afecte a las líneas subsiguientes
+        // Extraer solo los datos para batch insert
+        $batchData = array_column($chunk, 'data');
+
+        // ESTRATEGIA 1: Intentar batch insert completo (más rápido)
+        DB::beginTransaction();
+        try {
+            DB::table($tableName)->insert($batchData);
+            DB::commit();
+            $success = count($chunk);
+
+            return [
+                'success' => $success,
+                'errors' => 0,
+                'errors_logged' => 0,
+            ];
+        } catch (\Throwable $e) {
+            DB::rollBack();
+
+            // ESTRATEGIA 2: Si falla el batch, procesar línea por línea
+            // para identificar exactamente qué filas tienen problemas
+            Log::warning('Batch insert falló, procesando línea por línea', [
+                'table' => $tableName,
+                'chunk_size' => count($chunk),
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        // Fallback: Procesar línea por línea con transacción individual
         foreach ($chunk as $item) {
-            // Cada insert en su propia transacción
             DB::beginTransaction();
             try {
                 DB::table($tableName)->insert($item['data']);

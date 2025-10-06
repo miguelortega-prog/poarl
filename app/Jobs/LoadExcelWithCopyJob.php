@@ -142,13 +142,16 @@ class LoadExcelWithCopyJob implements ShouldQueue
                 $csvPath = $disk->path($sheetInfo['path']);
                 $csvPaths[] = $csvPath;
 
+                // Asegurar que $sheetName sea string (puede venir como int si es numérico)
+                $sheetName = (string) $sheetName;
+
                 Log::info('');
                 Log::info('📄 Procesando hoja: ' . $sheetName);
                 Log::info('   ├─ Filas esperadas: ' . number_format($sheetInfo['rows']));
                 Log::info('   └─ Tamaño: ' . round($sheetInfo['size'] / 1024 / 1024, 2) . ' MB');
 
                 // Paso 1: Normalizar CSV para que tenga todas las columnas de la tabla
-                $normalizedCsv = $this->normalizeCSV($csvPath, $columns, ';');
+                $normalizedCsv = $this->normalizeCSV($csvPath, $columns, ';', $sheetName);
                 $csvPaths[] = $normalizedCsv;
 
                 // Paso 2: Agregar run_id al CSV normalizado
@@ -240,19 +243,19 @@ class LoadExcelWithCopyJob implements ShouldQueue
     /**
      * Normaliza un CSV para que tenga todas las columnas esperadas.
      * Agrega columnas faltantes con valores vacíos.
-     *
-     * Usa split manual por delimitador en lugar de str_getcsv para evitar
-     * problemas con comillas escapadas.
+     * Si existe columna 'sheet_name', la llena con el nombre de la hoja.
      *
      * @param string $csvPath Ruta al CSV original
      * @param array $expectedColumns Lista de columnas esperadas (sin run_id)
      * @param string $delimiter Delimitador del CSV
+     * @param string|null $sheetName Nombre de la hoja (para columna sheet_name)
      * @return string Ruta al CSV normalizado
      */
     private function normalizeCSV(
         string $csvPath,
         array $expectedColumns,
-        string $delimiter = ';'
+        string $delimiter = ';',
+        ?string $sheetName = null
     ): string {
         $outputPath = $csvPath . '.normalized.csv';
         $input = fopen($csvPath, 'r');
@@ -274,19 +277,40 @@ class LoadExcelWithCopyJob implements ShouldQueue
             $columnMapping[$expectedCol] = $index !== false ? $index : null;
         }
 
+        // Log para debugging
+        Log::info('Normalizando CSV', [
+            'csv_path' => basename($csvPath),
+            'expected_columns' => count($expectedColumns),
+            'sheet_name' => $sheetName,
+            'has_sheet_name_column' => in_array('sheet_name', $expectedColumns),
+        ]);
+
         // Escribir header normalizado
         fwrite($output, implode($delimiter, $expectedColumns) . "\n");
 
         // Procesar cada línea de datos
         while (($line = fgets($input)) !== false) {
-            // Split manual por delimitador (más robusto que str_getcsv)
-            $data = explode($delimiter, trim($line));
+            $line = trim($line);
+            if (empty($line)) {
+                continue; // Saltar líneas vacías
+            }
+
+            // Usar str_getcsv para manejar correctamente comillas y delimitadores escapados
+            $data = str_getcsv($line, $delimiter, '"', '\\');
             $normalizedRow = [];
 
             foreach ($expectedColumns as $col) {
+                // Si la columna es 'sheet_name' y tenemos el nombre de la hoja, usarlo
+                if (strtolower($col) === 'sheet_name' && $sheetName !== null) {
+                    $normalizedRow[] = $sheetName;
+                    continue;
+                }
+
                 $sourceIndex = $columnMapping[$col];
                 if ($sourceIndex !== null && isset($data[$sourceIndex])) {
-                    $normalizedRow[] = $data[$sourceIndex];
+                    // Escapar comillas dobles para PostgreSQL COPY
+                    $value = str_replace('"', '""', $data[$sourceIndex]);
+                    $normalizedRow[] = $value;
                 } else {
                     $normalizedRow[] = ''; // Valor vacío para columnas faltantes
                 }

@@ -103,17 +103,20 @@ final class ProcessCollectionRunValidation implements ShouldQueue
                     'period' => $run->period,
                 ]);
 
-                // PASO 1: Verificar si hay archivos CSV
-                $csvFiles = $run->files()->whereIn('ext', ['csv'])->get();
+                // Obtener archivos CSV y Excel
+                $csvFiles = $run->files()->whereIn('ext', ['csv'])->with('dataSource')->get();
+                $excelFiles = $run->files()->whereIn('ext', ['xlsx', 'xls'])->with('dataSource')->get();
 
-                if ($csvFiles->isNotEmpty()) {
-                    // Despachar job de CSV con chain para continuar cuando termine
-                    $excelFiles = $run->files()->whereIn('ext', ['xlsx', 'xls'])->with('dataSource')->get();
+                if ($csvFiles->isNotEmpty() || $excelFiles->isNotEmpty()) {
+                    // Crear chain: CSV jobs → Excel jobs → ProcessCollectionDataJob
+                    $chain = [];
 
-                    // Crear chain: CSV → Excel jobs → ProcessCollectionDataJob
-                    $chain = [new LoadCsvDataSourcesJob($run->id)];
+                    // Agregar un job por cada archivo CSV
+                    foreach ($csvFiles as $file) {
+                        $chain[] = new LoadCsvDataSourcesJob($file->id, $file->dataSource->code);
+                    }
 
-                    // Agregar jobs de Excel al chain
+                    // Agregar un job por cada archivo Excel
                     foreach ($excelFiles as $file) {
                         $chain[] = new LoadExcelWithCopyJob($file->id, $file->dataSource->code);
                     }
@@ -123,7 +126,7 @@ final class ProcessCollectionRunValidation implements ShouldQueue
 
                     Log::info('Chain de jobs creado (ejecución SECUENCIAL)', [
                         'run_id' => $run->id,
-                        'csv_jobs' => 1,
+                        'csv_jobs' => $csvFiles->count(),
                         'excel_jobs' => $excelFiles->count(),
                         'processing_jobs' => 1,
                         'total_jobs' => count($chain),
@@ -150,7 +153,7 @@ final class ProcessCollectionRunValidation implements ShouldQueue
                         })
                         ->dispatch();
                 } else {
-                    Log::warning('No hay archivos CSV para procesar', [
+                    Log::warning('No hay archivos para procesar', [
                         'run_id' => $run->id,
                     ]);
                 }
