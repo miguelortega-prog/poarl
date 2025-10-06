@@ -285,8 +285,8 @@ class LoadExcelWithCopyJob implements ShouldQueue
             'has_sheet_name_column' => in_array('sheet_name', $expectedColumns),
         ]);
 
-        // Escribir header normalizado
-        fwrite($output, implode($delimiter, $expectedColumns) . "\n");
+        // Escribir header normalizado usando fputcsv para manejar comillas correctamente
+        fputcsv($output, $expectedColumns, $delimiter, '"', '\\');
 
         // Procesar cada línea de datos
         while (($line = fgets($input)) !== false) {
@@ -308,15 +308,15 @@ class LoadExcelWithCopyJob implements ShouldQueue
 
                 $sourceIndex = $columnMapping[$col];
                 if ($sourceIndex !== null && isset($data[$sourceIndex])) {
-                    // Escapar comillas dobles para PostgreSQL COPY
-                    $value = str_replace('"', '""', $data[$sourceIndex]);
-                    $normalizedRow[] = $value;
+                    // NO escapar aquí - fputcsv lo hará automáticamente
+                    $normalizedRow[] = $data[$sourceIndex];
                 } else {
                     $normalizedRow[] = ''; // Valor vacío para columnas faltantes
                 }
             }
 
-            fwrite($output, implode($delimiter, $normalizedRow) . "\n");
+            // Usar fputcsv en lugar de implode para manejar correctamente valores con delimitador
+            fputcsv($output, $normalizedRow, $delimiter, '"', '\\');
         }
 
         fclose($input);

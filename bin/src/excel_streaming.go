@@ -47,6 +47,16 @@ type Workbook struct {
 	} `xml:"sheets"`
 }
 
+type Relationships struct {
+	XMLName      xml.Name       `xml:"Relationships"`
+	Relationship []Relationship `xml:"Relationship"`
+}
+
+type Relationship struct {
+	ID     string `xml:"Id,attr"`
+	Target string `xml:"Target,attr"`
+}
+
 type SheetResult struct {
 	Name     string `json:"name"`
 	Path     string `json:"path"`
@@ -121,12 +131,11 @@ func main() {
 			continue
 		}
 
-		// Extraer sheet ID del nombre del archivo (sheet1.xml → 1)
+		// Extraer nombre base del archivo (xl/worksheets/sheet1.xml → sheet1)
 		sheetFilename := strings.TrimSuffix(strings.TrimPrefix(file.Name, "xl/worksheets/"), ".xml")
-		sheetID := strings.TrimPrefix(sheetFilename, "sheet")
 
-		// Obtener nombre real de la hoja desde workbook.xml
-		sheetName := sheetNames[sheetID]
+		// Obtener nombre real de la hoja desde el mapa (usa sheetFilename completo como clave)
+		sheetName := sheetNames[sheetFilename]
 		if sheetName == "" {
 			sheetName = sheetFilename // Fallback al nombre del archivo si no se encuentra
 		}
@@ -223,7 +232,42 @@ func loadSharedStrings(zipReader *zip.Reader) ([]string, error) {
 	return []string{}, nil
 }
 
+func loadRelationships(zipReader *zip.Reader) (map[string]string, error) {
+	// Buscar xl/_rels/workbook.xml.rels
+	for _, file := range zipReader.File {
+		if file.Name == "xl/_rels/workbook.xml.rels" {
+			rc, err := file.Open()
+			if err != nil {
+				return nil, err
+			}
+			defer rc.Close()
+
+			var rels Relationships
+			decoder := xml.NewDecoder(rc)
+			if err := decoder.Decode(&rels); err != nil {
+				return nil, err
+			}
+
+			// Crear mapa de rId → target (ej: rId1 → worksheets/sheet1.xml)
+			relMap := make(map[string]string)
+			for _, rel := range rels.Relationship {
+				relMap[rel.ID] = rel.Target
+			}
+
+			return relMap, nil
+		}
+	}
+
+	return make(map[string]string), nil
+}
+
 func loadSheetNames(zipReader *zip.Reader) (map[string]string, error) {
+	// Cargar relaciones (rId → archivo XML)
+	rels, err := loadRelationships(zipReader)
+	if err != nil {
+		return nil, fmt.Errorf("error loading relationships: %v", err)
+	}
+
 	// Buscar workbook.xml
 	for _, file := range zipReader.File {
 		if file.Name == "xl/workbook.xml" {
@@ -239,10 +283,17 @@ func loadSheetNames(zipReader *zip.Reader) (map[string]string, error) {
 				return nil, err
 			}
 
-			// Crear mapa de sheet ID → nombre
+			// Crear mapa de nombre_archivo → nombre_hoja
+			// Usando rId para conectar workbook.xml con archivos físicos
 			sheetMap := make(map[string]string)
 			for _, sheet := range workbook.Sheets.Sheet {
-				sheetMap[sheet.SheetID] = sheet.Name
+				// Obtener target del rId (ej: rId1 → worksheets/sheet1.xml)
+				target := rels[sheet.RID]
+				if target != "" {
+					// Extraer nombre base del archivo (ej: worksheets/sheet1.xml → sheet1)
+					baseName := strings.TrimSuffix(strings.TrimPrefix(target, "worksheets/"), ".xml")
+					sheetMap[baseName] = sheet.Name
+				}
 			}
 
 			return sheetMap, nil
