@@ -6,6 +6,7 @@ namespace App\UseCases\Recaudo\Comunicados;
 
 use App\DTOs\Recaudo\Comunicados\CreateCollectionNoticeRunDto;
 use App\DTOs\Recaudo\Comunicados\RunStoredFileDto;
+use App\Jobs\ConvertExcelToCsvJob;
 use App\Jobs\ProcessCollectionRunValidation;
 use App\Models\CollectionNoticeRun;
 use App\Models\CollectionNoticeType;
@@ -119,7 +120,7 @@ final class CreateCollectionNoticeRunUseCase
                     $tempDisk->deleteDirectory($tempDirectory);
                 }
 
-                $this->fileRepo->create(
+                $fileRecord = $this->fileRepo->create(
                     $run->id,
                     new RunStoredFileDto(
                         noticeDataSourceId: (int) $dataSourceId,
@@ -133,6 +134,20 @@ final class CreateCollectionNoticeRunUseCase
                         uploadedBy: $dto->requestedById,
                     )
                 );
+
+                // Si es archivo Excel, despachar job de conversión a CSV
+                if ($ext !== null && in_array($ext, ['xlsx', 'xls'], true)) {
+                    Log::info('Despachando job de conversión Excel a CSV', [
+                        'run_id' => $run->id,
+                        'file_id' => $fileRecord->id,
+                        'file_path' => $relativePath,
+                        'size_mb' => round($size / 1024 / 1024, 2),
+                        'period' => $run->period,
+                    ]);
+
+                    // El job auto-detectará la hoja basado en el periodo del run
+                    ConvertExcelToCsvJob::dispatch($fileRecord->id);
+                }
             }
 
             // Despachar Job de validación

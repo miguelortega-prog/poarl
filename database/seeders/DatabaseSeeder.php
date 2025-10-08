@@ -22,6 +22,7 @@ class DatabaseSeeder extends Seeder
             CollectionNoticeTypeSeeder::class,
             NoticeDataSourceSeeder::class,
             CollectionNoticeTypeDataSourceSeeder::class,
-        ]);
+	]);
+	$this->call(CollectionNoticeTypeProcessorSeeder::class);
     }
 }

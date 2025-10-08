@@ -43,6 +43,10 @@ class CreateRunModal extends Component
 
     public string $periodValue = '';
 
+    public ?string $officialId = null;
+
+    public bool $isSubmitting = false;
+
     /**
      * @var array<int, array{id:int, name:string}>
      */
@@ -76,6 +80,9 @@ class CreateRunModal extends Component
         return [
             'typeId.required' => 'Selecciona un tipo de comunicado.',
             'typeId.exists' => 'Selecciona un tipo de comunicado válido.',
+            'officialId.required' => 'Debes ingresar la cédula del funcionario.',
+            'officialId.string' => 'La cédula debe ser un valor válido.',
+            'officialId.max' => 'La cédula no debe exceder 50 caracteres.',
             'period.required' => 'Debes ingresar el periodo en formato YYYYMM.',
             'period.regex' => 'El periodo debe tener formato YYYYMM.',
             'files.*.required' => 'Debes adjuntar el archivo correspondiente a este insumo.',
@@ -97,6 +104,7 @@ class CreateRunModal extends Component
     {
         return [
             'typeId' => 'tipo de comunicado',
+            'officialId' => 'cédula funcionario',
             'period' => 'periodo',
             'files.*' => 'insumo requerido',
         ];
@@ -177,20 +185,15 @@ class CreateRunModal extends Component
     {
         $checks = [
             'typeId_filled' => filled($this->typeId),
+            'officialId_filled' => filled($this->officialId),
             'period_valid' => $this->periodInputIsValid(),
             'has_dataSources' => count($this->dataSources) > 0,
             'all_files_selected' => $this->allFilesSelected(),
             'no_errors' => $this->getErrorBag()->isEmpty(),
         ];
 
-        Log::debug('CreateRunModal::isFormValid check', array_merge($checks, [
-            'typeId' => $this->typeId,
-            'files_count' => count($this->files),
-            'dataSources_count' => count($this->dataSources),
-            'errors' => $this->getErrorBag()->toArray(),
-        ]));
-
         return filled($this->typeId)
+            && filled($this->officialId)
             && $this->periodInputIsValid()
             && count($this->dataSources) > 0
             && $this->allFilesSelected()
@@ -234,7 +237,7 @@ class CreateRunModal extends Component
     public function updatedOpen(bool $value): void
     {
         if (!$value) {
-            $this->reset(['typeId', 'dataSources', 'files', 'periodMode', 'period', 'periodReadonly', 'periodValue']);
+            $this->reset(['typeId', 'officialId', 'dataSources', 'files', 'periodMode', 'period', 'periodReadonly', 'periodValue']);
             $this->resetValidation();
             $this->broadcastFormValidity();
         }
@@ -244,6 +247,13 @@ class CreateRunModal extends Component
     {
         if ($propertyName === 'typeId') {
             $this->validateOnly('typeId');
+            $this->broadcastFormValidity();
+
+            return;
+        }
+
+        if ($propertyName === 'officialId') {
+            $this->validateOnly('officialId');
             $this->broadcastFormValidity();
 
             return;
@@ -477,6 +487,7 @@ class CreateRunModal extends Component
     {
         $rules = [
             'typeId' => ['required', 'integer', 'exists:collection_notice_types,id'],
+            'officialId' => ['required', 'string', 'max:50'],
         ];
 
         if ($this->periodMode === 'write') {
@@ -567,7 +578,7 @@ class CreateRunModal extends Component
     #[On('openCreateRunModal')]
     public function handleOpenCreateRunModal(): void
     {
-        $this->reset(['typeId', 'dataSources', 'files', 'periodMode', 'period', 'periodReadonly', 'periodValue']);
+        $this->reset(['typeId', 'officialId', 'dataSources', 'files', 'periodMode', 'period', 'periodReadonly', 'periodValue']);
         $this->resetValidation();
         $this->open = true;
         $this->broadcastFormValidity();
@@ -575,13 +586,20 @@ class CreateRunModal extends Component
 
     public function cancel(): void
     {
-        $this->reset(['open', 'typeId', 'dataSources', 'files', 'periodMode', 'period', 'periodReadonly', 'periodValue']);
+        $this->reset(['open', 'typeId', 'officialId', 'dataSources', 'files', 'periodMode', 'period', 'periodReadonly', 'periodValue', 'isSubmitting']);
         $this->resetValidation();
         $this->broadcastFormValidity();
     }
 
     public function submit(): void
     {
+        // Prevenir doble submit
+        if ($this->isSubmitting) {
+            return;
+        }
+
+        $this->isSubmitting = true;
+
         Log::info('CreateRunModal::submit iniciado', [
             'typeId' => $this->typeId,
             'periodMode' => $this->periodMode,
@@ -593,6 +611,7 @@ class CreateRunModal extends Component
         try {
             $this->validate();
         } catch (Throwable $e) {
+            $this->isSubmitting = false;
             Log::error('Error de validación en CreateRunModal', [
                 'errors' => $this->getErrorBag()->toArray(),
                 'exception' => $e->getMessage(),
@@ -611,6 +630,7 @@ class CreateRunModal extends Component
             collectionNoticeTypeId: (int) $this->typeId,
             periodValue: (string) ($this->periodValue ?: $this->period),
             requestedById: $userId,
+            officialId: $this->officialId,
             files: $normalizedFiles,
         );
 
@@ -627,6 +647,8 @@ class CreateRunModal extends Component
             report($e);
             $this->addError('general', __('No fue posible crear el trabajo. Intenta de nuevo.'));
             $this->dispatch('toast', type: 'error', message: $e->getMessage());
+        } finally {
+            $this->isSubmitting = false;
         }
     }
 

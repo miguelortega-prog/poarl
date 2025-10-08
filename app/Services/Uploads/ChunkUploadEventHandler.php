@@ -36,11 +36,6 @@ final readonly class ChunkUploadEventHandler
      */
     public function handleUploading(ChunkUploadEventPayload $payload): array
     {
-        $this->logEvent('chunk_uploading', $payload->dataSourceId, [
-            'status' => $payload->status,
-            'message' => $payload->message,
-        ]);
-
         // Solo registramos el evento, no mutamos estado en Livewire
         return [
             'success' => true,
@@ -72,12 +67,6 @@ final readonly class ChunkUploadEventHandler
 
             // Validar archivo con reglas OWASP
             $this->validator->validate($metadata);
-
-            $this->logEvent('chunk_uploaded_success', $payload->dataSourceId, [
-                'path' => $metadata->path,
-                'size' => $metadata->size,
-                'extension' => $metadata->extension,
-            ]);
 
             return [
                 'success' => true,

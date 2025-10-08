@@ -38,14 +38,14 @@ enum CollectionNoticeRunStatus: string
     public function badgeClass(): string
     {
         return match ($this) {
-            self::PENDING => 'bg-gray-500',
-            self::VALIDATING => 'bg-blue-500',
-            self::VALIDATION_FAILED => 'bg-orange-500',
-            self::VALIDATED => 'bg-green-500',
-            self::PROCESSING => 'bg-indigo-500',
-            self::COMPLETED => 'bg-green-700',
-            self::FAILED => 'bg-red-500',
-            self::CANCELLED => 'bg-gray-400',
+            self::PENDING => 'bg-gray-500 text-white',
+            self::VALIDATING => 'bg-secondary-600 text-primary-900',
+            self::VALIDATION_FAILED => 'bg-danger text-white',
+            self::VALIDATED => 'bg-gray-500 text-white',
+            self::PROCESSING => 'bg-info-900 text-white',
+            self::COMPLETED => 'bg-primary-900 text-white',
+            self::FAILED => 'bg-danger text-white',
+            self::CANCELLED => 'bg-danger text-white',
         };
     }
 }

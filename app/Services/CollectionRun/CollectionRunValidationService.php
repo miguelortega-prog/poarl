@@ -38,10 +38,13 @@ final readonly class CollectionRunValidationService
     /**
      * Valida todos los archivos de un CollectionNoticeRun.
      *
-     * @throws RuntimeException Si la validación falla
+     * @param CollectionNoticeRun $run
+     *
+     * @return bool True si la validación fue exitosa, false si falló
+     *
      * @throws Throwable
      */
-    public function validate(CollectionNoticeRun $run): void
+    public function validate(CollectionNoticeRun $run): bool
     {
         // Actualizar estado a validating
         $run->update([
@@ -130,9 +133,9 @@ final readonly class CollectionRunValidationService
                 // Enviar notificación de fallo
                 $this->sendFailureNotification($run, $validationErrors);
 
-                // NO lanzar excepción aquí, retornar normalmente
+                // NO lanzar excepción aquí, retornar false
                 // Los errores ya están guardados en la BD
-                return;
+                return false;
             }
 
             // Validación exitosa
@@ -151,6 +154,9 @@ final readonly class CollectionRunValidationService
 
             // Enviar notificación de éxito
             $this->sendSuccessNotification($run);
+
+            // Retornar true para indicar validación exitosa
+            return true;
         } catch (Throwable $exception) {
             DB::rollBack();
 

@@ -194,7 +194,33 @@ return [
             'maxJobs' => 0,
             'memory' => 256,
             'tries' => 3,
+            'timeout' => 900,
+            'nice' => 0,
+        ],
+        'supervisor-csv-loading' => [
+            'connection' => 'redis',
+            'queue' => ['csv-loading'],
+            'balance' => 'auto',
+            'autoScalingStrategy' => 'time',
+            'maxProcesses' => 1,
+            'maxTime' => 0,
+            'maxJobs' => 0,
+            'memory' => 512,
+            'tries' => 2,
             'timeout' => 300,
+            'nice' => 0,
+        ],
+        'supervisor-excel-loading' => [
+            'connection' => 'redis',
+            'queue' => ['excel-loading'],
+            'balance' => 'auto',
+            'autoScalingStrategy' => 'time',
+            'maxProcesses' => 3,
+            'maxTime' => 0,
+            'maxJobs' => 0,
+            'memory' => 2048,
+            'tries' => 2,
+            'timeout' => 2400,
             'nice' => 0,
         ],
         'supervisor-processing' => [
@@ -205,9 +231,9 @@ return [
             'maxProcesses' => 2,
             'maxTime' => 0,
             'maxJobs' => 0,
-            'memory' => 512,
+            'memory' => 2048,
             'tries' => 3,
-            'timeout' => 600,
+            'timeout' => 1800,
             'nice' => 0,
         ],
         'supervisor-default' => [
@@ -218,9 +244,9 @@ return [
             'maxProcesses' => 1,
             'maxTime' => 0,
             'maxJobs' => 0,
-            'memory' => 128,
+            'memory' => 2048,
             'tries' => 1,
-            'timeout' => 60,
+            'timeout' => 14400,
             'nice' => 0,
         ],
     ],
@@ -231,6 +257,16 @@ return [
                 'maxProcesses' => 5,
                 'balanceMaxShift' => 1,
                 'balanceCooldown' => 3,
+            ],
+            'supervisor-csv-loading' => [
+                'maxProcesses' => 1,
+                'balanceMaxShift' => 1,
+                'balanceCooldown' => 3,
+            ],
+            'supervisor-excel-loading' => [
+                'maxProcesses' => 3,
+                'balanceMaxShift' => 1,
+                'balanceCooldown' => 5,
             ],
             'supervisor-processing' => [
                 'maxProcesses' => 3,
@@ -247,6 +283,12 @@ return [
         'local' => [
             'supervisor-validation' => [
                 'maxProcesses' => 2,
+            ],
+            'supervisor-csv-loading' => [
+                'maxProcesses' => 1,
+            ],
+            'supervisor-excel-loading' => [
+                'maxProcesses' => 3,
             ],
             'supervisor-processing' => [
                 'maxProcesses' => 1,
