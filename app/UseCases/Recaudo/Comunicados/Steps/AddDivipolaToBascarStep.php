@@ -10,22 +10,28 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Step: Agregar DIVIPOLA y dirección válida a BASCAR desde PAGPLA.
+ * Step: Agregar DIVIPOLA y dirección válida a BASCAR desde DIR_TOM/CIU_TOM y PAGPLA.
  *
  * 1. Agrega columnas 'divipola' y 'direccion' a data_source_bascar si no existen
- * 2. Cruza BASCAR.NUM_TOMADOR con PAGPLA.identificacion_aportante
- * 3. Busca TODAS las direcciones de PAGPLA que crucen
- * 4. Selecciona la PRIMERA que cumpla:
- *    - Estructura válida de dirección colombiana (Tipo vía + número + complemento)
- *    - NO sea "AV CALLE 26 # 68B 31 TSB"
- *    - NO contenga "NO DEFINIDA"
- * 5. Obtiene divipola (codigo_departamento LPAD 2 + codigo_ciudad LPAD 3)
+ * 2. PRIORIDAD 1: Valida y copia DIR_TOM/CIU_TOM si cumplen criterios:
+ *    - DIR_TOM: Estructura válida de dirección colombiana
+ *    - CIU_TOM: Código válido para construir DIVIPOLA
+ *    - Divipola construido: LPAD(SUBSTRING(CIU_TOM, 1, 2), 2) + LPAD(SUBSTRING(CIU_TOM, 3), 3)
+ * 3. PRIORIDAD 2: Para registros que quedaron sin datos, cruza con PAGPLA:
+ *    - BASCAR.NUM_TOMADOR = PAGPLA.identificacion_aportante
+ *    - Selecciona la PRIMERA dirección válida
  *
- * Ejemplo: codigo_departamento='5', codigo_ciudad='1' → divipola='05001'
- *          direccion='Calle 11 # 23A-45 Apto 301'
+ * Criterios de validación de dirección (aplicados a ambas fuentes):
+ * - Contiene tipo de vía colombiana (calle, carrera, diagonal, etc.)
+ * - Contiene números
+ * - NO sea "AV CALLE 26 # 68B 31 TSB"
+ * - NO contenga "NO DEFINIDA"
+ * - Longitud mínima: 7 caracteres
  *
- * Cruce:
- * BASCAR.NUM_TOMADOR = PAGPLA.identificacion_aportante → primer dirección válida + divipola
+ * Ejemplo DIR_TOM/CIU_TOM:
+ *   DIR_TOM='Calle 11 # 23A-45', CIU_TOM='5001' → direccion='Calle 11 # 23A-45', divipola='05001'
+ * Ejemplo PAGPLA:
+ *   codigo_departamento='5', codigo_ciudad='1' → divipola='05001', direccion='...'
  */
 final class AddDivipolaToBascarStep implements ProcessingStepInterface
 {
@@ -38,22 +44,27 @@ final class AddDivipolaToBascarStep implements ProcessingStepInterface
     {
         $startTime = microtime(true);
 
-        Log::info('🗺️  Agregando DIVIPOLA y dirección válida a BASCAR desde PAGPLA', [
+        Log::info('🗺️  Agregando DIVIPOLA y dirección válida a BASCAR desde DIR_TOM/CIU_TOM y PAGPLA', [
             'step' => self::class,
             'run_id' => $run->id,
         ]);
 
-        // Agregar columnas divipola y direccion si no existen
+        // Paso 1: Agregar columnas divipola y direccion si no existen
         $this->ensureColumnsExist($run);
 
-        // Poblar divipola y direccion válida desde PAGPLA
-        $updatedCount = $this->populateValidAddressFromPagpla($run);
+        // Paso 2: PRIORIDAD 1 - Copiar desde DIR_TOM y CIU_TOM si son válidos
+        $fromDirTom = $this->copyValidAddressFromDirTomCiuTom($run);
+
+        // Paso 3: PRIORIDAD 2 - Completar desde PAGPLA solo registros vacíos
+        $fromPagpla = $this->populateValidAddressFromPagpla($run);
 
         $duration = (int) ((microtime(true) - $startTime) * 1000);
 
         Log::info('✅ DIVIPOLA y dirección válida agregados a BASCAR', [
             'run_id' => $run->id,
-            'records_updated' => $updatedCount,
+            'from_dir_tom_ciu_tom' => $fromDirTom,
+            'from_pagpla' => $fromPagpla,
+            'total_records_updated' => $fromDirTom + $fromPagpla,
             'duration_ms' => $duration,
         ]);
     }
@@ -103,14 +114,69 @@ final class AddDivipolaToBascarStep implements ProcessingStepInterface
     }
 
     /**
-     * Pobla divipola y direccion válida desde PAGPLA.
+     * Copia DIR_TOM y CIU_TOM a direccion y divipola si cumplen criterios de validación.
      *
-     * Busca TODAS las direcciones de PAGPLA que crucen con NUM_TOMADOR
+     * PRIORIDAD 1: Valida DIR_TOM (dirección) y CIU_TOM (ciudad) existentes en BASCAR:
+     * - DIR_TOM: Estructura válida de dirección colombiana
+     * - CIU_TOM: Código válido para construir DIVIPOLA
+     *   - Formato: primeros 2 caracteres = departamento, resto = ciudad
+     *   - Ejemplo: '5001' → divipola '05001' (dpto: 05, ciudad: 001)
+     */
+    private function copyValidAddressFromDirTomCiuTom(CollectionNoticeRun $run): int
+    {
+        Log::info('Copiando DIR_TOM y CIU_TOM válidos a direccion y divipola', [
+            'run_id' => $run->id,
+        ]);
+
+        $updated = DB::update("
+            UPDATE data_source_bascar
+            SET
+                direccion = TRIM(DIR_TOM),
+                divipola = CONCAT(
+                    LPAD(SUBSTRING(CIU_TOM, 1, 2), 2, '0'),
+                    LPAD(SUBSTRING(CIU_TOM, 3), 3, '0')
+                )
+            WHERE run_id = ?
+                -- Validar DIR_TOM (dirección)
+                AND DIR_TOM IS NOT NULL
+                AND DIR_TOM != ''
+                -- Validar que contenga tipo de vía común en Colombia (case-insensitive)
+                AND DIR_TOM ~* '(calle|carrera|diagonal|avenida|transversal|autopista|circular|variante|cl|cr|cra|dg|av|tv|circ|var|krr)'
+                -- Validar que contenga números (característica esencial de dirección)
+                AND DIR_TOM ~ '[0-9]'
+                -- Excluir direcciones específicas prohibidas
+                AND UPPER(TRIM(DIR_TOM)) != 'AV CALLE 26 # 68B 31 TSB'
+                AND UPPER(DIR_TOM) NOT LIKE '%NO DEFINIDA%'
+                -- Validar que tenga al menos longitud mínima razonable (ej: 'CL 1 # 2-3')
+                AND LENGTH(DIR_TOM) >= 7
+                -- Validar CIU_TOM (código ciudad)
+                AND CIU_TOM IS NOT NULL
+                AND CIU_TOM != ''
+                -- Validar que CIU_TOM tenga al menos 3 caracteres (mínimo para dpto + ciudad)
+                AND LENGTH(CIU_TOM) >= 3
+                -- Validar que CIU_TOM contenga solo dígitos
+                AND CIU_TOM ~ '^[0-9]+$'
+        ", [$run->id]);
+
+        Log::info('Dirección y DIVIPOLA válidos copiados desde DIR_TOM y CIU_TOM', [
+            'run_id' => $run->id,
+            'updated_count' => $updated,
+        ]);
+
+        return $updated;
+    }
+
+    /**
+     * Pobla divipola y direccion válida desde PAGPLA solo para registros que quedaron sin datos.
+     *
+     * PRIORIDAD 2: Busca TODAS las direcciones de PAGPLA que crucen con NUM_TOMADOR
      * y selecciona la PRIMERA que cumpla con estructura válida.
+     *
+     * Solo actualiza registros donde direccion o divipola estén vacíos.
      */
     private function populateValidAddressFromPagpla(CollectionNoticeRun $run): int
     {
-        Log::info('Buscando primera dirección válida desde PAGPLA', [
+        Log::info('Buscando primera dirección válida desde PAGPLA (solo registros vacíos)', [
             'run_id' => $run->id,
         ]);
 
@@ -141,7 +207,7 @@ final class AddDivipolaToBascarStep implements ProcessingStepInterface
                     LIMIT 1
                 ),
                 direccion = (
-                    SELECT p.direccion
+                    SELECT TRIM(p.direccion)
                     FROM data_source_pagpla AS p
                     WHERE p.run_id = ?
                         AND p.identificacion_aportante = b.NUM_TOMADOR
@@ -158,6 +224,11 @@ final class AddDivipolaToBascarStep implements ProcessingStepInterface
             WHERE b.run_id = ?
                 AND b.NUM_TOMADOR IS NOT NULL
                 AND b.NUM_TOMADOR != ''
+                -- NUEVO: Solo actualizar registros que quedaron sin direccion o divipola
+                AND (
+                    (b.direccion IS NULL OR b.direccion = '')
+                    OR (b.divipola IS NULL OR b.divipola = '')
+                )
         ", [$run->id, $run->id, $run->id]);
 
         Log::info('DIVIPOLA y dirección válida poblados desde PAGPLA', [

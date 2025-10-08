@@ -146,7 +146,7 @@ final class IdentifyPsiStep implements ProcessingStepInterface
         // Actualizar PSI desde BAPRPO
         $updated = DB::update("
             UPDATE data_source_bascar b
-            SET psi = baprpo.pol_independiente
+            SET psi = TRIM(baprpo.pol_independiente)
             FROM data_source_baprpo baprpo
             WHERE b.NUM_TOMADOR = baprpo.tomador
                 AND b.run_id = ?

@@ -10,17 +10,20 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Step: Agregar email válido a BASCAR desde PAGPLA.
+ * Step: Agregar email válido a BASCAR desde email_tom y PAGPLA.
  *
  * 1. Agrega columna 'email' a data_source_bascar si no existe
- * 2. Cruza BASCAR.NUM_TOMADOR con PAGPLA.identificacion_aportante
- * 3. Busca TODOS los emails de PAGPLA que crucen
- * 4. Selecciona el PRIMERO que cumpla:
+ * 2. PRIORIDAD 1: Valida y copia email_tom a email si cumple criterios:
  *    - Formato de email válido
  *    - NO sea de dominios @segurosbolivar.com o @segurosbolivar.com.co
+ * 3. PRIORIDAD 2: Para registros que quedaron sin email, cruza con PAGPLA:
+ *    - BASCAR.NUM_TOMADOR = PAGPLA.identificacion_aportante
+ *    - Selecciona el PRIMERO que cumpla los mismos criterios de validación
  *
- * Cruce:
- * BASCAR.NUM_TOMADOR = PAGPLA.identificacion_aportante → primer email válido
+ * Criterios de validación (aplicados a ambas fuentes):
+ * - Formato regex: ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$
+ * - NO @segurosbolivar.com
+ * - NO @segurosbolivar.com.co
  */
 final class AddEmailToBascarStep implements ProcessingStepInterface
 {
@@ -33,22 +36,27 @@ final class AddEmailToBascarStep implements ProcessingStepInterface
     {
         $startTime = microtime(true);
 
-        Log::info('📧 Agregando email válido a BASCAR desde PAGPLA', [
+        Log::info('📧 Agregando email válido a BASCAR desde email_tom y PAGPLA', [
             'step' => self::class,
             'run_id' => $run->id,
         ]);
 
-        // Agregar columna email si no existe
+        // Paso 1: Agregar columna email si no existe
         $this->ensureEmailColumnExists($run);
 
-        // Poblar email válido desde PAGPLA (filtrando formato y dominio)
-        $updatedCount = $this->populateValidEmailFromPagpla($run);
+        // Paso 2: PRIORIDAD 1 - Copiar desde email_tom si es válido
+        $fromEmailTom = $this->copyValidEmailFromEmailTom($run);
+
+        // Paso 3: PRIORIDAD 2 - Completar desde PAGPLA solo registros vacíos
+        $fromPagpla = $this->populateValidEmailFromPagpla($run);
 
         $duration = (int) ((microtime(true) - $startTime) * 1000);
 
         Log::info('✅ Email válido agregado a BASCAR', [
             'run_id' => $run->id,
-            'emails_populated' => $updatedCount,
+            'from_email_tom' => $fromEmailTom,
+            'from_pagpla' => $fromPagpla,
+            'total_emails_populated' => $fromEmailTom + $fromPagpla,
             'duration_ms' => $duration,
         ]);
     }
@@ -83,16 +91,53 @@ final class AddEmailToBascarStep implements ProcessingStepInterface
     }
 
     /**
-     * Pobla email válido desde PAGPLA.
+     * Copia email_tom a email si cumple criterios de validación.
      *
-     * Busca TODOS los emails de PAGPLA que crucen con NUM_TOMADOR
+     * PRIORIDAD 1: Valida email_tom existente en BASCAR y lo copia a email si:
+     * - No es NULL ni vacío
+     * - Cumple formato válido
+     * - NO es de @segurosbolivar.com o @segurosbolivar.com.co
+     */
+    private function copyValidEmailFromEmailTom(CollectionNoticeRun $run): int
+    {
+        Log::info('Copiando email_tom válido a email', [
+            'run_id' => $run->id,
+        ]);
+
+        $updated = DB::update("
+            UPDATE data_source_bascar
+            SET email = TRIM(email_tom)
+            WHERE run_id = ?
+                AND email_tom IS NOT NULL
+                AND email_tom != ''
+                -- Validar formato de email
+                AND email_tom ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'
+                -- Excluir dominios de Seguros Bolivar
+                AND LOWER(email_tom) NOT LIKE '%@segurosbolivar.com'
+                AND LOWER(email_tom) NOT LIKE '%@segurosbolivar.com.co'
+        ", [$run->id]);
+
+        Log::info('Emails válidos copiados desde email_tom', [
+            'run_id' => $run->id,
+            'updated_count' => $updated,
+        ]);
+
+        return $updated;
+    }
+
+    /**
+     * Pobla email válido desde PAGPLA solo para registros que quedaron sin email.
+     *
+     * PRIORIDAD 2: Busca TODOS los emails de PAGPLA que crucen con NUM_TOMADOR
      * y selecciona el PRIMERO que cumpla:
      * - Formato válido
      * - NO sea de @segurosbolivar.com o @segurosbolivar.com.co
+     *
+     * Solo actualiza registros donde email IS NULL OR email = ''
      */
     private function populateValidEmailFromPagpla(CollectionNoticeRun $run): int
     {
-        Log::info('Buscando primer email válido desde PAGPLA', [
+        Log::info('Buscando primer email válido desde PAGPLA (solo registros vacíos)', [
             'run_id' => $run->id,
         ]);
 
@@ -100,7 +145,7 @@ final class AddEmailToBascarStep implements ProcessingStepInterface
         $updated = DB::update("
             UPDATE data_source_bascar AS b
             SET email = (
-                SELECT p.email
+                SELECT TRIM(p.email)
                 FROM data_source_pagpla AS p
                 WHERE p.run_id = ?
                     AND p.identificacion_aportante = b.NUM_TOMADOR
@@ -117,6 +162,8 @@ final class AddEmailToBascarStep implements ProcessingStepInterface
             WHERE b.run_id = ?
                 AND b.NUM_TOMADOR IS NOT NULL
                 AND b.NUM_TOMADOR != ''
+                -- NUEVO: Solo actualizar registros que quedaron sin email
+                AND (b.email IS NULL OR b.email = '')
         ", [$run->id, $run->id]);
 
         Log::info('Emails válidos poblados desde PAGPLA', [
