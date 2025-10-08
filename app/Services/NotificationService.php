@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Models\CollectionNoticeRun;
 use App\Models\User;
 use App\Models\UserNotification;
 use Illuminate\Database\Eloquent\Collection;
@@ -177,5 +178,89 @@ final class NotificationService
         DB::table('user_notifications')->insert($notifications);
 
         return count($notifications);
+    }
+
+    /**
+     * Notifica al usuario que el procesamiento de datos fue exitoso.
+     *
+     * @param CollectionNoticeRun $run
+     *
+     * @return void
+     */
+    public function notifyProcessingSuccess(CollectionNoticeRun $run): void
+    {
+        $this->notify(
+            userId: $run->requested_by_id,
+            title: 'Procesamiento completado',
+            message: sprintf(
+                'El comunicado #%d "%s" se procesó exitosamente.',
+                $run->id,
+                $run->type->name ?? 'Sin tipo'
+            ),
+            type: 'success',
+            data: [
+                'run_id' => $run->id,
+                'type' => 'processing_completed',
+            ],
+            actionUrl: route('recaudo.comunicados.index')
+        );
+    }
+
+    /**
+     * Notifica al usuario que el procesamiento de datos falló.
+     *
+     * @param CollectionNoticeRun $run
+     * @param string $errorMessage
+     *
+     * @return void
+     */
+    public function notifyProcessingFailure(CollectionNoticeRun $run, string $errorMessage): void
+    {
+        $this->notify(
+            userId: $run->requested_by_id,
+            title: 'Error en procesamiento',
+            message: sprintf(
+                'El comunicado #%d falló durante el procesamiento: %s',
+                $run->id,
+                $errorMessage
+            ),
+            type: 'error',
+            data: [
+                'run_id' => $run->id,
+                'type' => 'processing_failed',
+                'error' => $errorMessage,
+            ],
+            actionUrl: route('recaudo.comunicados.index')
+        );
+    }
+
+    /**
+     * Método helper para crear notificaciones.
+     *
+     * @param int $userId
+     * @param string $title
+     * @param string $message
+     * @param string $type
+     * @param array<string, mixed>|null $data
+     * @param string|null $actionUrl
+     *
+     * @return void
+     */
+    private function notify(
+        int $userId,
+        string $title,
+        string $message,
+        string $type,
+        ?array $data = null,
+        ?string $actionUrl = null
+    ): void {
+        $this->create([
+            'user_id' => $userId,
+            'type' => $type,
+            'title' => $title,
+            'message' => $message,
+            'data' => $data,
+            'action_url' => $actionUrl,
+        ]);
     }
 }

@@ -14,6 +14,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  *
  * @property int $id
  * @property int|null $collection_notice_type_id
+ * @property string|null $period
  * @property int|null $requested_by_id
  * @property \Illuminate\Support\Carbon|null $started_at
  * @property \Illuminate\Support\Carbon|null $validated_at
@@ -23,6 +24,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property string $status
  * @property array|null $errors
  * @property array|null $metadata
+ * @property array|null $results
  * @property \Illuminate\Support\Carbon|null $created_at
  * @property \Illuminate\Support\Carbon|null $updated_at
  */
@@ -32,6 +34,7 @@ class CollectionNoticeRun extends Model
 
     protected $fillable = [
         'collection_notice_type_id',
+        'period',
         'requested_by_id',
         'started_at',
         'validated_at',
@@ -41,6 +44,7 @@ class CollectionNoticeRun extends Model
         'status',
         'errors',
         'metadata',
+        'results',
     ];
 
     protected $casts = [
@@ -51,6 +55,7 @@ class CollectionNoticeRun extends Model
         'duration_ms' => 'integer',
         'errors' => 'array',
         'metadata' => 'array',
+        'results' => 'array',
     ];
 
     /**
@@ -80,6 +85,11 @@ class CollectionNoticeRun extends Model
     public function files(): HasMany
     {
         return $this->hasMany(CollectionNoticeRunFile::class);
+    }
+
+    public function resultFiles(): HasMany
+    {
+        return $this->hasMany(CollectionNoticeRunResultFile::class);
     }
 
     // Scopes

@@ -283,6 +283,7 @@ export function collectionRunUploader(options) {
 
             this.dispatchLifecycle('collection-run::chunkUploading', { status: 'uploading' });
             this.dispatchLifecycle('chunk-uploading', { status: 'uploading' });
+            this.broadcastUploadState(true);
 
             try {
                 const session = new ChunkedUploadSession({
@@ -341,6 +342,7 @@ export function collectionRunUploader(options) {
             } finally {
                 this.isUploading = false;
                 this.currentSession = null;
+                this.broadcastUploadState(false);
             }
         },
 
@@ -463,6 +465,25 @@ export function collectionRunUploader(options) {
                 dataSourceId: this.dataSourceId,
                 ...payload,
             });
+        },
+
+        broadcastUploadState(isUploading) {
+            // Comprobar si hay alguna carga en progreso
+            setTimeout(() => {
+                const uploaders = document.querySelectorAll('[x-data*="collectionRunUploader"]');
+                let anyUploading = false;
+
+                uploaders.forEach(el => {
+                    const alpineData = el.__x?.$data;
+                    if (alpineData?.isUploading === true) {
+                        anyUploading = true;
+                    }
+                });
+
+                window.dispatchEvent(new CustomEvent('upload-state-changed', {
+                    detail: { anyUploading }
+                }));
+            }, 50);
         },
     };
 }

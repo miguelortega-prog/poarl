@@ -6,10 +6,12 @@ namespace App\Jobs;
 
 use App\Models\CollectionNoticeRun;
 use App\Services\CollectionRun\CollectionRunValidationService;
+use Illuminate\Bus\Batch;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -52,7 +54,7 @@ final class ProcessCollectionRunValidation implements ShouldQueue
     public function __construct(
         private readonly int $collectionNoticeRunId
     ) {
-        $this->onQueue('validation');
+        $this->onQueue('default');
     }
 
     /**
@@ -75,8 +77,10 @@ final class ProcessCollectionRunValidation implements ShouldQueue
                 ->findOrFail($this->collectionNoticeRunId);
 
             // Validar que el run esté en estado correcto
-            if (!in_array($run->status, ['pending', 'validating'], true)) {
-                Log::warning('CollectionNoticeRun no está en estado válido para validación', [
+            // Nota: 'validated' se incluye porque el run puede haber sido validado previamente
+            // pero aún necesita ejecutar la carga de datos
+            if (!in_array($run->status, ['pending', 'validating', 'validated'], true)) {
+                Log::warning('CollectionNoticeRun no está en estado válido para validación/carga', [
                     'run_id' => $run->id,
                     'status' => $run->status,
                 ]);
@@ -85,11 +89,75 @@ final class ProcessCollectionRunValidation implements ShouldQueue
             }
 
             // Ejecutar validación mediante el servicio
-            $validationService->validate($run);
+            $validationSuccess = $validationService->validate($run);
 
-            Log::info('Validación de CollectionNoticeRun completada exitosamente', [
+            Log::info('Validación de CollectionNoticeRun completada', [
                 'run_id' => $run->id,
+                'success' => $validationSuccess,
             ]);
+
+            // Si la validación fue exitosa, disparar jobs de carga SECUENCIALMENTE
+            if ($validationSuccess) {
+                Log::info('Iniciando carga SECUENCIAL de data sources (CSV → Excel → SQL)', [
+                    'run_id' => $run->id,
+                    'period' => $run->period,
+                ]);
+
+                // Obtener archivos CSV y Excel
+                $csvFiles = $run->files()->whereIn('ext', ['csv'])->with('dataSource')->get();
+                $excelFiles = $run->files()->whereIn('ext', ['xlsx', 'xls'])->with('dataSource')->get();
+
+                if ($csvFiles->isNotEmpty() || $excelFiles->isNotEmpty()) {
+                    // Crear chain: CSV jobs → Excel jobs → ProcessCollectionDataJob
+                    $chain = [];
+
+                    // Agregar un job por cada archivo CSV
+                    foreach ($csvFiles as $file) {
+                        $chain[] = new LoadCsvDataSourcesJob($file->id, $file->dataSource->code);
+                    }
+
+                    // Agregar un job por cada archivo Excel
+                    foreach ($excelFiles as $file) {
+                        $chain[] = new LoadExcelWithCopyJob($file->id, $file->dataSource->code);
+                    }
+
+                    // Agregar job de procesamiento SQL al final
+                    $chain[] = new ProcessCollectionDataJob($run->id);
+
+                    Log::info('Chain de jobs creado (ejecución SECUENCIAL)', [
+                        'run_id' => $run->id,
+                        'csv_jobs' => $csvFiles->count(),
+                        'excel_jobs' => $excelFiles->count(),
+                        'processing_jobs' => 1,
+                        'total_jobs' => count($chain),
+                    ]);
+
+                    // Despachar el chain (se ejecutarán UNO TRAS OTRO)
+                    Bus::chain($chain)
+                        ->onQueue('default')
+                        ->catch(function (Throwable $e) use ($run) {
+                            Log::error('Error en chain de carga de data sources', [
+                                'run_id' => $run->id,
+                                'error' => $e->getMessage(),
+                                'trace' => $e->getTraceAsString(),
+                            ]);
+
+                            $run->update([
+                                'status' => 'failed',
+                                'failed_at' => now(),
+                                'errors' => [
+                                    'message' => 'Error durante la carga secuencial de archivos',
+                                    'details' => $e->getMessage(),
+                                ],
+                            ]);
+                        })
+                        ->dispatch();
+                } else {
+                    Log::warning('No hay archivos para procesar', [
+                        'run_id' => $run->id,
+                    ]);
+                }
+            }
         } catch (Throwable $exception) {
             Log::error('Error al validar CollectionNoticeRun', [
                 'run_id' => $this->collectionNoticeRunId,
