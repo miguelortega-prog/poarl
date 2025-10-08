@@ -48,7 +48,7 @@ abstract class BaseCollectionNoticeProcessor implements CollectionNoticeProcesso
      * @param string $absolutePath Ruta absoluta al archivo
      * @return void
      */
-    protected static function fixFilePermissions(string $absolutePath): void
+    public static function fixFilePermissions(string $absolutePath): void
     {
         if (!file_exists($absolutePath)) {
             return;
