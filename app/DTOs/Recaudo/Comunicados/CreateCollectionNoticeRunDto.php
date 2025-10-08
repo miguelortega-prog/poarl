@@ -11,6 +11,7 @@ final class CreateCollectionNoticeRunDto
         public readonly int $collectionNoticeTypeId,
         public readonly string $periodValue,
         public readonly int $requestedById,
+        public readonly ?string $officialId,
         public readonly array $files,
     ) {}
 }

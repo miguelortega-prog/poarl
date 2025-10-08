@@ -47,7 +47,9 @@ final class LoadCsvDataSourcesJob implements ShouldQueue
 
     /**
      * Número de intentos del job.
-     * Solo 1 intento para evitar duplicación de datos.
+     * 1 intento (sin reintentos) para archivos grandes.
+     * Los reintentos pueden causar colisiones y timeouts en archivos de 150MB+.
+     * La idempotencia está garantizada limpiando la tabla antes de insertar.
      */
     public int $tries = 1;
 
@@ -55,6 +57,11 @@ final class LoadCsvDataSourcesJob implements ShouldQueue
      * Tiempo máximo de ejecución (4 horas para archivos CSV grandes con seguridad).
      */
     public int $timeout = 14400;
+
+    /**
+     * Tiempo de espera antes de reintentar (en segundos).
+     */
+    public int $backoff = 30;
 
     /**
      * Map de códigos a tablas PostgreSQL.
@@ -151,16 +158,33 @@ final class LoadCsvDataSourcesJob implements ShouldQueue
                 'size_mb' => round($fileSize / 1024 / 1024, 2),
             ]);
 
-            // Obtener columnas de la tabla (excluir id, run_id y created_at)
-            $columns = \DB::select(
-                "SELECT column_name
-                 FROM information_schema.columns
-                 WHERE table_name = ?
-                 AND column_name NOT IN ('id', 'run_id', 'created_at')
-                 ORDER BY ordinal_position",
-                [$tableName]
-            );
-            $columns = array_column($columns, 'column_name');
+            // Leer el header del CSV para obtener las columnas reales
+            // (NO usar todas las columnas de la DB, porque algunas se añaden en pasos posteriores)
+            $csvHandle = fopen($csvPath, 'r');
+            if ($csvHandle === false) {
+                throw new RuntimeException("No se pudo abrir CSV para leer header: {$csvPath}");
+            }
+
+            $headerLine = fgets($csvHandle);
+            fclose($csvHandle);
+
+            if ($headerLine === false) {
+                throw new RuntimeException("No se pudo leer header del CSV: {$csvPath}");
+            }
+
+            // Parsear header y convertir a minúsculas para que coincida con nombres de columnas DB
+            $columns = str_getcsv(trim($headerLine), ';');
+            $columns = array_map(function($col, $index) {
+                $trimmed = strtolower(trim($col));
+                // Si está vacío, generar nombre automático (col_57, col_58, etc.)
+                return !empty($trimmed) ? $trimmed : 'col_' . ($index + 1);
+            }, $columns, array_keys($columns));
+
+            Log::info('Columnas leídas del CSV header', [
+                'data_source' => $this->dataSourceCode,
+                'columns_count' => count($columns),
+                'columns' => implode(', ', $columns),
+            ]);
 
             // Usar ResilientCsvImporter (procesa línea por línea con chunks)
             $result = $importer->importFromFile(
@@ -204,15 +228,20 @@ final class LoadCsvDataSourcesJob implements ShouldQueue
     }
 
     /**
-     * Maneja el fallo del job.
+     * Maneja el fallo del job después de todos los intentos.
      */
     public function failed(Throwable $exception): void
     {
-        Log::error('Job de carga CSV falló definitivamente', [
+        Log::critical('Job de carga CSV falló definitivamente después de todos los intentos', [
             'job' => self::class,
             'file_id' => $this->fileId,
             'data_source' => $this->dataSourceCode,
-            'error' => $exception->getMessage(),
+            'attempts' => $this->tries,
+            'error_message' => $exception->getMessage(),
+            'error_code' => $exception->getCode(),
+            'error_file' => $exception->getFile(),
+            'error_line' => $exception->getLine(),
+            'trace' => $exception->getTraceAsString(),
         ]);
     }
 }

@@ -5,21 +5,23 @@ declare(strict_types=1);
 namespace App\UseCases\Recaudo\Comunicados\Steps;
 
 use App\Contracts\Recaudo\Comunicados\ProcessingStepInterface;
-use App\DTOs\Recaudo\Comunicados\ProcessingContextDto;
+use App\Models\CollectionNoticeRun;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use RuntimeException;
 
 /**
- * Paso para validar que los datos fueron cargados correctamente por los jobs previos.
+ * Step: Validar integridad de datos cargados por jobs previos.
  *
  * IMPORTANTE: Este step NO carga datos, solo VALIDA que los jobs previos
  * (LoadCsvDataSourcesJob y LoadExcelWithCopyJob) hayan cargado correctamente
  * todos los data sources a sus respectivas tablas en la base de datos.
  *
  * Validaciones:
- * - Verifica que todas las tablas de data sources tengan registros para este run_id
- * - Valida conteos mínimos de registros por tabla
- * - Reporta estadísticas de carga
+ * 1. Verifica que todas las tablas de data sources tengan registros para este run_id
+ * 2. Valida que las columnas cargadas coincidan con las parametrizadas en notice_data_source_columns
+ * 3. Reporta columnas faltantes o sobrantes
+ * 4. Reporta estadísticas de carga
  */
 final class ValidateDataIntegrityStep implements ProcessingStepInterface
 {
@@ -35,14 +37,14 @@ final class ValidateDataIntegrityStep implements ProcessingStepInterface
         'PAGPLA' => 'data_source_pagpla',
     ];
 
-    /**
-     * @param ProcessingContextDto $context
-     *
-     * @return ProcessingContextDto
-     */
-    public function execute(ProcessingContextDto $context): ProcessingContextDto
+    public function getName(): string
     {
-        $run = $context->run;
+        return 'Validar integridad de datos cargados por jobs';
+    }
+
+    public function execute(CollectionNoticeRun $run): void
+    {
+        $startTime = microtime(true);
 
         Log::info('🔍 Validando integridad de datos cargados por jobs previos', [
             'step' => self::class,
@@ -50,120 +52,150 @@ final class ValidateDataIntegrityStep implements ProcessingStepInterface
         ]);
 
         // Obtener data sources esperados del tipo de comunicado
-        $expectedDataSources = $run->type->dataSources->pluck('code')->toArray();
+        $expectedDataSources = $run->type->dataSources;
 
         Log::info('Data sources esperados según tipo de comunicado', [
             'run_id' => $run->id,
-            'expected' => $expectedDataSources,
+            'expected' => $expectedDataSources->pluck('code')->toArray(),
         ]);
 
         $validationResults = [];
-        $missingDataSources = [];
-        $emptyDataSources = [];
+        $errors = [];
         $totalRecords = 0;
 
         // Validar cada data source esperado
-        foreach ($expectedDataSources as $dataSourceCode) {
-            if (!isset(self::TABLE_MAP[$dataSourceCode])) {
-                Log::warning('Data source no tiene tabla mapeada', [
+        foreach ($expectedDataSources as $dataSource) {
+            $code = $dataSource->code;
+
+            if (!isset(self::TABLE_MAP[$code])) {
+                $errors[] = "Data source {$code} no tiene tabla mapeada";
+                Log::error('❌ Data source sin tabla mapeada', [
                     'run_id' => $run->id,
-                    'data_source' => $dataSourceCode,
+                    'data_source' => $code,
                 ]);
-                $missingDataSources[] = $dataSourceCode;
                 continue;
             }
 
-            $tableName = self::TABLE_MAP[$dataSourceCode];
+            $tableName = self::TABLE_MAP[$code];
 
-            // Contar registros para este run_id
+            // Validación 1: Contar registros para este run_id
             $recordCount = DB::table($tableName)
                 ->where('run_id', $run->id)
                 ->count();
 
-            $validationResults[$dataSourceCode] = [
+            if ($recordCount === 0) {
+                $errors[] = "Data source {$code} no tiene registros en BD (tabla: {$tableName})";
+                Log::error('❌ Data source sin registros', [
+                    'run_id' => $run->id,
+                    'data_source' => $code,
+                    'table' => $tableName,
+                ]);
+                continue;
+            }
+
+            // Validación 2: Validar columnas
+            $columnValidation = $this->validateColumns($tableName, $dataSource);
+
+            $validationResults[$code] = [
                 'table' => $tableName,
                 'records' => $recordCount,
+                'column_validation' => $columnValidation,
             ];
 
-            if ($recordCount === 0) {
-                $emptyDataSources[] = $dataSourceCode;
-                Log::error('❌ Data source sin registros en BD', [
-                    'run_id' => $run->id,
-                    'data_source' => $dataSourceCode,
-                    'table' => $tableName,
-                ]);
-            } else {
-                $totalRecords += $recordCount;
-                Log::info('✅ Data source validado', [
-                    'run_id' => $run->id,
-                    'data_source' => $dataSourceCode,
-                    'table' => $tableName,
-                    'records' => number_format($recordCount),
-                ]);
+            if (!empty($columnValidation['missing_columns'])) {
+                $errors[] = sprintf(
+                    "Data source %s: columnas faltantes en tabla %s: %s",
+                    $code,
+                    $tableName,
+                    implode(', ', $columnValidation['missing_columns'])
+                );
             }
+
+            $totalRecords += $recordCount;
+
+            Log::info('✅ Data source validado', [
+                'run_id' => $run->id,
+                'data_source' => $code,
+                'table' => $tableName,
+                'records' => number_format($recordCount),
+                'expected_columns' => $columnValidation['expected_count'],
+                'actual_columns' => $columnValidation['actual_count'],
+                'missing_columns' => $columnValidation['missing_columns'],
+                'extra_columns' => $columnValidation['extra_columns'],
+            ]);
         }
 
-        // Reportar errores si hay data sources sin datos
-        if (!empty($emptyDataSources)) {
-            $errorMessage = sprintf(
-                'Los siguientes data sources NO tienen registros en BD (jobs de carga fallaron): %s',
-                implode(', ', $emptyDataSources)
-            );
+        $duration = (int) ((microtime(true) - $startTime) * 1000);
+
+        // Si hay errores, lanzar excepción
+        if (!empty($errors)) {
+            $errorMessage = "Validación de integridad FALLÓ:\n" . implode("\n", $errors);
 
             Log::error('❌ Validación de integridad FALLÓ', [
                 'run_id' => $run->id,
-                'empty_data_sources' => $emptyDataSources,
+                'errors' => $errors,
                 'validation_results' => $validationResults,
             ]);
 
-            return $context->addError($errorMessage);
-        }
-
-        if (!empty($missingDataSources)) {
-            $errorMessage = sprintf(
-                'Los siguientes data sources no tienen tabla mapeada: %s',
-                implode(', ', $missingDataSources)
-            );
-
-            Log::error('❌ Validación de integridad FALLÓ', [
-                'run_id' => $run->id,
-                'missing_data_sources' => $missingDataSources,
-            ]);
-
-            return $context->addError($errorMessage);
+            throw new RuntimeException($errorMessage);
         }
 
         Log::info('✅ Validación de integridad completada exitosamente', [
             'run_id' => $run->id,
             'data_sources_validated' => count($validationResults),
             'total_records_loaded' => number_format($totalRecords),
-            'validation_results' => $validationResults,
-        ]);
-
-        return $context->addStepResult($this->getName(), [
-            'validation_passed' => true,
-            'data_sources_validated' => count($validationResults),
-            'total_records' => $totalRecords,
-            'details' => $validationResults,
+            'duration_ms' => $duration,
         ]);
     }
 
     /**
-     * @return string
-     */
-    public function getName(): string
-    {
-        return 'Validar integridad de datos cargados por jobs';
-    }
-
-    /**
-     * @param ProcessingContextDto $context
+     * Valida que las columnas de la tabla física coincidan con las parametrizadas.
      *
-     * @return bool
+     * @param string $tableName Nombre de la tabla
+     * @param \App\Models\NoticeDataSource $dataSource Data source con columnas esperadas
+     * @return array Resultado de validación
      */
-    public function shouldExecute(ProcessingContextDto $context): bool
+    private function validateColumns(string $tableName, $dataSource): array
     {
-        // Siempre ejecutar para validar que los jobs previos cargaron los datos
-        return true;
+        // Obtener columnas esperadas de notice_data_source_columns
+        $expectedColumns = $dataSource->columns()
+            ->pluck('column_name')
+            ->map(function ($col) {
+                // Normalización completa para coincidir con los nombres de columnas en la tabla física:
+                // 1. Convertir a minúsculas
+                // 2. Reemplazar caracteres especiales (espacios, puntos, etc.) por underscores
+                // 3. Eliminar underscores duplicados
+                $normalized = strtolower($col);
+                $normalized = preg_replace('/[^a-z0-9]+/', '_', $normalized);
+                $normalized = trim($normalized, '_'); // Remover underscores al inicio/final
+                return $normalized;
+            })
+            ->toArray();
+
+        // Obtener columnas reales de la tabla (excluir id, run_id, created_at, sheet_name)
+        $actualColumns = DB::select("
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = ?
+                AND column_name NOT IN ('id', 'run_id', 'created_at', 'sheet_name')
+            ORDER BY ordinal_position
+        ", [$tableName]);
+
+        $actualColumns = array_map(
+            fn($col) => strtolower($col->column_name),
+            $actualColumns
+        );
+
+        // Comparar
+        $missingColumns = array_diff($expectedColumns, $actualColumns);
+        $extraColumns = array_diff($actualColumns, $expectedColumns);
+
+        return [
+            'expected_count' => count($expectedColumns),
+            'actual_count' => count($actualColumns),
+            'missing_columns' => array_values($missingColumns),
+            'extra_columns' => array_values($extraColumns),
+            'matches' => empty($missingColumns) && empty($extraColumns),
+        ];
     }
 }

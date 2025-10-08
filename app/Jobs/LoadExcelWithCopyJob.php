@@ -44,7 +44,10 @@ class LoadExcelWithCopyJob implements ShouldQueue
     public int $timeout = 3600;
 
     /**
-     * Solo 1 intento para evitar duplicación de datos.
+     * Número de intentos del job.
+     * SIN REINTENTOS: archivos Excel grandes son complejos y largos,
+     * los reintentos generan colisiones de archivos temporales y datos.
+     * La idempotencia está garantizada limpiando la tabla antes de insertar.
      */
     public int $tries = 1;
 
@@ -354,10 +357,41 @@ class LoadExcelWithCopyJob implements ShouldQueue
 
     public function failed(Throwable $exception): void
     {
-        Log::error('Job de carga optimizada falló definitivamente', [
+        $tableName = self::TABLE_MAP[$this->dataSourceCode] ?? null;
+
+        Log::critical('Job de carga Excel falló definitivamente', [
+            'job' => self::class,
             'file_id' => $this->fileId,
             'data_source' => $this->dataSourceCode,
-            'error' => $exception->getMessage(),
+            'table' => $tableName,
+            'error_message' => $exception->getMessage(),
+            'error_code' => $exception->getCode(),
+            'error_file' => $exception->getFile(),
+            'error_line' => $exception->getLine(),
         ]);
+
+        // Limpiar datos parciales que pudieron haberse insertado antes del fallo
+        if ($tableName !== null) {
+            try {
+                $file = CollectionNoticeRunFile::find($this->fileId);
+                if ($file) {
+                    $runId = $file->collection_notice_run_id;
+                    $deleted = DB::table($tableName)->where('run_id', $runId)->delete();
+
+                    if ($deleted > 0) {
+                        Log::warning('Datos parciales eliminados después del fallo', [
+                            'table' => $tableName,
+                            'run_id' => $runId,
+                            'deleted_rows' => $deleted,
+                        ]);
+                    }
+                }
+            } catch (Throwable $e) {
+                Log::error('Error al limpiar datos parciales en failed()', [
+                    'table' => $tableName,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
     }
 }

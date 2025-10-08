@@ -6,7 +6,6 @@ namespace App\Services\Recaudo\Comunicados;
 
 use App\Contracts\Recaudo\Comunicados\CollectionNoticeProcessorInterface;
 use App\Contracts\Recaudo\Comunicados\ProcessingStepInterface;
-use App\DTOs\Recaudo\Comunicados\ProcessingContextDto;
 use App\Models\CollectionNoticeRun;
 use App\Services\Recaudo\DataSourceTableManager;
 use Illuminate\Contracts\Filesystem\Factory as FilesystemFactory;
@@ -41,6 +40,38 @@ abstract class BaseCollectionNoticeProcessor implements CollectionNoticeProcesso
     }
 
     /**
+     * Corrige permisos de un archivo para asegurar acceso por www-data.
+     *
+     * Este método es útil cuando los archivos son creados por procesos
+     * que corren como root (ej: jobs de Horizon ejecutados desde CLI).
+     *
+     * @param string $absolutePath Ruta absoluta al archivo
+     * @return void
+     */
+    protected static function fixFilePermissions(string $absolutePath): void
+    {
+        if (!file_exists($absolutePath)) {
+            return;
+        }
+
+        // Establecer permisos 644 (rw-r--r--)
+        @chmod($absolutePath, 0644);
+
+        // Intentar cambiar owner a www-data si es posible
+        // (solo funcionará si el proceso actual es root)
+        @chown($absolutePath, 'www-data');
+        @chgrp($absolutePath, 'www-data');
+
+        // También corregir permisos del directorio padre si es necesario
+        $parentDir = dirname($absolutePath);
+        if (file_exists($parentDir)) {
+            @chmod($parentDir, 0755);
+            @chown($parentDir, 'www-data');
+            @chgrp($parentDir, 'www-data');
+        }
+    }
+
+    /**
      * Procesa el run ejecutando todos los pasos del pipeline.
      *
      * @param CollectionNoticeRun $run
@@ -62,30 +93,8 @@ abstract class BaseCollectionNoticeProcessor implements CollectionNoticeProcesso
         try {
             DB::beginTransaction();
 
-            // Marcar como procesando
-            $run->update([
-                'status' => 'processing',
-                'started_at' => now(),
-            ]);
-
-            // Crear contexto inicial
-            $context = new ProcessingContextDto(
-                run: $run,
-                metadata: [
-                    'processor_name' => $this->getName(),
-                    'started_at' => now()->toIso8601String(),
-                ],
-            );
-
             // Ejecutar pipeline de pasos
-            $context = $this->executePipeline($context);
-
-            // Verificar si hubo errores
-            if ($context->hasErrors()) {
-                throw new RuntimeException(
-                    'El procesamiento falló con errores: ' . implode('; ', $context->errors)
-                );
-            }
+            $this->executePipeline($run);
 
             // Calcular duración
             $duration = (int) ((microtime(true) - $startTime) * 1000);
@@ -95,7 +104,6 @@ abstract class BaseCollectionNoticeProcessor implements CollectionNoticeProcesso
                 'status' => 'completed',
                 'completed_at' => now(),
                 'duration_ms' => $duration,
-                'results' => $context->results,
             ]);
 
             DB::commit();
@@ -143,58 +151,30 @@ abstract class BaseCollectionNoticeProcessor implements CollectionNoticeProcesso
     /**
      * Ejecuta el pipeline de pasos de procesamiento.
      *
-     * @param ProcessingContextDto $context
+     * @param CollectionNoticeRun $run
      *
-     * @return ProcessingContextDto
+     * @return void
      */
-    protected function executePipeline(ProcessingContextDto $context): ProcessingContextDto
+    protected function executePipeline(CollectionNoticeRun $run): void
     {
-        $currentContext = $context;
-
         foreach ($this->steps as $step) {
-            // Verificar si el paso debe ejecutarse
-            if (!$step->shouldExecute($currentContext)) {
-                Log::debug('Paso omitido', [
-                    'step' => $step->getName(),
-                    'run_id' => $currentContext->run->id,
-                ]);
-                continue;
-            }
-
             Log::info('Ejecutando paso de procesamiento', [
                 'step' => $step->getName(),
-                'run_id' => $currentContext->run->id,
+                'run_id' => $run->id,
             ]);
 
             $stepStartTime = microtime(true);
 
-            try {
-                $currentContext = $step->execute($currentContext);
+            $step->execute($run);
 
-                $stepDuration = (int) ((microtime(true) - $stepStartTime) * 1000);
+            $stepDuration = (int) ((microtime(true) - $stepStartTime) * 1000);
 
-                Log::info('Paso completado', [
-                    'step' => $step->getName(),
-                    'run_id' => $currentContext->run->id,
-                    'duration_ms' => $stepDuration,
-                ]);
-            } catch (Throwable $exception) {
-                Log::error('Error en paso de procesamiento', [
-                    'step' => $step->getName(),
-                    'run_id' => $currentContext->run->id,
-                    'error' => $exception->getMessage(),
-                ]);
-
-                $currentContext = $currentContext->addError(
-                    sprintf('Error en paso "%s": %s', $step->getName(), $exception->getMessage())
-                );
-
-                // Detener pipeline si hay error crítico
-                break;
-            }
+            Log::info('Paso completado', [
+                'step' => $step->getName(),
+                'run_id' => $run->id,
+                'duration_ms' => $stepDuration,
+            ]);
         }
-
-        return $currentContext;
     }
 
     /**

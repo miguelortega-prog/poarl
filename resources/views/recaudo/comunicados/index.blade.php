@@ -120,16 +120,13 @@
                         </div>
                     </form>
 
-                    <div class="grid grid-cols-10 gap-4 rounded-2xl bg-gray-100 px-6 py-3 text-label font-semibold uppercase tracking-wide text-gray-700 dark:bg-gray-900/60 dark:text-gray-200">
+                    <div class="grid grid-cols-7 gap-4 rounded-2xl bg-gray-100 px-6 py-3 text-label font-semibold uppercase tracking-wide text-gray-700 dark:bg-gray-900/60 dark:text-gray-200">
                         <span>{{ __('Id Comunicado') }}</span>
                         <span>{{ __('Periodo') }}</span>
                         <span>{{ __('Fecha Programación') }}</span>
                         <span>{{ __('Usuario Programación') }}</span>
-                        <span>{{ __('Fecha Ejecución') }}</span>
-                        <span>{{ __('Tiempo en Minutos') }}</span>
                         <span>{{ __('Estado') }}</span>
                         <span>{{ __('Resultados') }}</span>
-                        <span class="text-center">{{ __('Archivos') }}</span>
                         <span class="text-center">OPERATIONS</span>
                     </div>
 
@@ -138,35 +135,30 @@
                             $canDelete = in_array($run->status, [
                                 \App\Enums\Recaudo\CollectionNoticeRunStatus::PENDING->value,
                                 \App\Enums\Recaudo\CollectionNoticeRunStatus::VALIDATION_FAILED->value,
+                                \App\Enums\Recaudo\CollectionNoticeRunStatus::FAILED->value,
+                                \App\Enums\Recaudo\CollectionNoticeRunStatus::CANCELLED->value,
                             ], true);
                         @endphp
-                        <div class="grid grid-cols-10 items-center gap-4 rounded-2xl border border-gray-200 px-6 py-4 text-body text-gray-700 transition dark:border-gray-700 dark:text-gray-200">
-                            <span class="font-semibold text-gray-900 dark:text-gray-100">#{{ $run->id }}</span>
+                        <div x-data="{ openRunDetails: false, openResultFiles: false, openErrors: false }">
+                        <div class="grid grid-cols-7 items-center gap-4 rounded-2xl border border-gray-200 px-6 py-4 text-body text-gray-700 transition dark:border-gray-700 dark:text-gray-200">
+                            <button
+                                type="button"
+                                @click="openRunDetails = true"
+                                class="font-semibold text-primary hover:text-primary-600 hover:underline text-left"
+                            >
+                                {{ $run->id }}
+                            </button>
                             <span class="text-sm">
                                 {{ $run->period === '*' ? __('Todos') : ($run->period ?? __('N/D')) }}
                             </span>
                             <span>{{ optional($run->created_at)->format('d/m/Y H:i') ?? __('Sin programación') }}</span>
                             <span>{{ $run->requestedBy?->name ?? __('No asignado') }}</span>
                             <span>
-                                @if ($run->started_at)
-                                    {{ $run->started_at->format('d/m/Y H:i') }}
-                                @else
-                                    {{ __('Pendiente') }}
-                                @endif
-                            </span>
-                            <span>
-                                @if ($run->duration_ms)
-                                    {{ (int) ceil($run->duration_ms / 60000) }}
-                                @else
-                                    {{ __('N/D') }}
-                                @endif
-                            </span>
-                            <span>
                                 @php
                                     $statusEnum = \App\Enums\Recaudo\CollectionNoticeRunStatus::tryFrom($run->status);
                                 @endphp
                                 @if($statusEnum)
-                                    <span class="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold text-white {{ $statusEnum->badgeClass() }}">
+                                    <span class="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold {{ $statusEnum->badgeClass() }}">
                                         {{ $statusEnum->label() }}
                                     </span>
                                 @else
@@ -175,40 +167,28 @@
                                     </span>
                                 @endif
                             </span>
-                            <div>
+                            <div class="flex justify-center">
                                 @if($run->resultFiles->isNotEmpty())
-                                    <div class="flex flex-col gap-1">
-                                        @foreach($run->resultFiles as $resultFile)
-                                            <a
-                                                href="{{ route('recaudo.comunicados.download-result', ['run' => $run->id, 'resultFile' => $resultFile->id]) }}"
-                                                target="_blank"
-                                                class="inline-flex items-center gap-1 text-xs text-primary hover:text-primary-600 hover:underline"
-                                                title="{{ $resultFile->file_name }} ({{ number_format($resultFile->records_count) }} registros)"
-                                            >
-                                                <i class="fa-solid fa-download"></i>
-                                                <span>{{ $resultFile->file_type }}</span>
-                                            </a>
-                                        @endforeach
+                                    <div class="relative inline-block">
+                                        <button
+                                            type="button"
+                                            @click="openResultFiles = true"
+                                            class="inline-flex items-center justify-center rounded-full bg-green-500/10 p-2 text-green-600 transition hover:bg-green-500/20 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 focus:ring-offset-white dark:focus:ring-offset-gray-900"
+                                            aria-label="{{ __('Ver archivos de resultados') }}"
+                                            title="{{ trans_choice(':count archivo resultado|:count archivos resultados', $run->resultFiles->count()) }}"
+                                        >
+                                            <i class="fa-solid fa-folder text-lg"></i>
+                                        </button>
+                                        <span class="absolute top-0 right-0 flex h-4 w-4 items-center justify-center rounded-full bg-green-600 text-[10px] font-bold text-white transform translate-x-1/4 -translate-y-1/4">{{ $run->resultFiles->count() }}</span>
                                     </div>
                                 @else
-                                    <span class="text-xs text-gray-400">{{ __('Sin resultados') }}</span>
+                                    <span class="text-xs text-gray-400">{{ __('—') }}</span>
                                 @endif
                             </div>
-                            <div x-data="{ openFiles: false, openErrors: false }" class="relative flex justify-center gap-2">
-                                {{-- Botón Ver Archivos --}}
-                                <button
-                                    type="button"
-                                    x-on:click="openFiles = true"
-                                    class="inline-flex items-center justify-center rounded-full bg-primary/10 p-2 text-primary transition hover:bg-primary/20 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 focus:ring-offset-white dark:focus:ring-offset-gray-900"
-                                    aria-label="{{ __('Ver archivos de insumo') }}"
-                                >
-                                    <i class="fa-solid fa-folder-open text-lg"></i>
-                                    @if ($run->files->isNotEmpty())
-                                        <span class="sr-only">{{ trans_choice(':count archivo|:count archivos', $run->files->count()) }}</span>
-                                    @endif
-                                </button>
 
-                                {{-- Botón Ver Errores (solo si falló) --}}
+                            {{-- Columna Operations: Ver Errores + Eliminar --}}
+                            <div class="flex justify-center gap-2">
+                                {{-- Botón Ver Errores --}}
                                 @if(in_array($run->status, ['validation_failed', 'failed']))
                                     <button
                                         type="button"
@@ -220,55 +200,157 @@
                                     </button>
                                 @endif
 
-                                {{-- Modal Ver Archivos --}}
-                                <div
-                                    x-cloak
-                                    x-show="openFiles"
-                                    x-transition.opacity
+                                {{-- Botón Eliminar --}}
+                                <form
+                                    method="POST"
+                                    action="{{ route('recaudo.comunicados.destroy', $run) }}"
+                                    x-data="{ confirmDelete() { return confirm(@js(__('¿Deseas eliminar este comunicado? Esta acción no se puede deshacer.'))); } }"
+                                >
+                                    @csrf
+                                    @method('DELETE')
+
+                                    <button
+                                        type="submit"
+                                        @click.prevent="
+                                            if (! {{ $canDelete ? 'true' : 'false' }}) {
+                                                return;
+                                            }
+
+                                            if (confirmDelete()) {
+                                                $el.closest('form').submit();
+                                            }
+                                        "
+                                        @disabled(! $canDelete)
+                                        aria-disabled="{{ $canDelete ? 'false' : 'true' }}"
+                                        class="inline-flex items-center justify-center rounded-full p-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-white dark:focus:ring-offset-gray-900 {{
+                                            $canDelete
+                                                ? 'bg-red-100 text-red-600 hover:bg-red-200 focus:ring-red-500'
+                                                : 'cursor-not-allowed bg-gray-200 text-gray-400 dark:bg-gray-700 dark:text-gray-500'
+                                        }}"
+                                        title="{{ $canDelete ? __('Eliminar comunicado') : __('Solo se pueden eliminar comunicados en estado: Pendiente, Validación fallida, Fallido o Cancelado.') }}"
+                                    >
+                                        <i class="fa-solid fa-trash"></i>
+                                        <span class="sr-only">{{ __('Eliminar comunicado') }}</span>
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+
+                        {{-- TODOS LOS MODALES FUERA DEL GRID --}}
+                        {{-- Modal Detalles del Comunicado --}}
+                        <div
+                            x-cloak
+                            x-show="openRunDetails"
+                            x-transition.opacity
                                     class="fixed inset-0 z-50 flex items-center justify-center"
                                     aria-modal="true"
                                     role="dialog"
                                 >
-                                    <div class="absolute inset-0 bg-gray-900/50" x-on:click="openFiles = false"></div>
+                                    <div class="absolute inset-0 bg-gray-900/50" x-on:click="openRunDetails = false"></div>
 
-                                    <div class="relative z-10 w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl dark:bg-gray-800">
+                                    <div class="relative z-10 w-full max-w-3xl rounded-3xl bg-white p-6 shadow-2xl dark:bg-gray-800">
                                         <div class="flex items-center justify-between">
                                             <h3 class="text-h5 font-semibold text-gray-900 dark:text-gray-100">
-                                                {{ __('Archivos de insumo') }}
+                                                {{ __('Detalles del Comunicado #:id', ['id' => $run->id]) }}
                                             </h3>
                                             <button
                                                 type="button"
                                                 class="rounded-full p-2 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary-500"
-                                                x-on:click="openFiles = false"
+                                                x-on:click="openRunDetails = false"
                                                 aria-label="{{ __('Cerrar') }}"
                                             >
                                                 <i class="fa-solid fa-xmark"></i>
                                             </button>
                                         </div>
 
-                                        <div class="mt-4 max-h-64 space-y-3 overflow-y-auto pr-1">
-                                            @forelse ($run->files as $file)
-                                                <div class="rounded-2xl border border-gray-200 p-4 dark:border-gray-700">
-                                                    <p class="text-sm font-semibold text-gray-900 dark:text-gray-100">{{ $file->original_name }}</p>
-                                                    <p class="text-xs text-gray-500 dark:text-gray-400">
-                                                        {{ $file->dataSource?->name ?? __('Sin origen') }}
-                                                        •
-                                                        {{ $file->uploader?->name ?? __('Sin usuario') }}
-                                                    </p>
-                                                    <p class="mt-1 text-xs text-gray-400">
-                                                        {{ optional($file->created_at)->format('d/m/Y H:i') ?? __('Sin fecha') }}
-                                                    </p>
-                                                </div>
-                                            @empty
-                                                <p class="text-sm text-gray-500 dark:text-gray-400">{{ __('No hay archivos asignados a este comunicado.') }}</p>
-                                            @endforelse
+                                        {{-- Resumen del Run --}}
+                                        <div class="mt-6 grid grid-cols-2 gap-4">
+                                            <div class="rounded-2xl border border-gray-200 p-4 dark:border-gray-700">
+                                                <p class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">{{ __('Tipo') }}</p>
+                                                <p class="mt-1 text-sm font-semibold text-gray-900 dark:text-gray-100">{{ $run->type?->name ?? __('N/D') }}</p>
+                                            </div>
+                                            <div class="rounded-2xl border border-gray-200 p-4 dark:border-gray-700">
+                                                <p class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">{{ __('Periodo') }}</p>
+                                                <p class="mt-1 text-sm font-semibold text-gray-900 dark:text-gray-100">{{ $run->period === '*' ? __('Todos') : ($run->period ?? __('N/D')) }}</p>
+                                            </div>
+                                            <div class="rounded-2xl border border-gray-200 p-4 dark:border-gray-700">
+                                                <p class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">{{ __('Estado') }}</p>
+                                                <p class="mt-1">
+                                                    @php
+                                                        $statusEnum = \App\Enums\Recaudo\CollectionNoticeRunStatus::tryFrom($run->status);
+                                                    @endphp
+                                                    @if($statusEnum)
+                                                        <span class="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold {{ $statusEnum->badgeClass() }}">
+                                                            {{ $statusEnum->label() }}
+                                                        </span>
+                                                    @else
+                                                        <span class="text-sm text-gray-900 dark:text-gray-100">{{ __($run->status) }}</span>
+                                                    @endif
+                                                </p>
+                                            </div>
+                                            <div class="rounded-2xl border border-gray-200 p-4 dark:border-gray-700">
+                                                <p class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">{{ __('Solicitado por') }}</p>
+                                                <p class="mt-1 text-sm font-semibold text-gray-900 dark:text-gray-100">{{ $run->requestedBy?->name ?? __('No asignado') }}</p>
+                                            </div>
+                                            <div class="rounded-2xl border border-gray-200 p-4 dark:border-gray-700">
+                                                <p class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">{{ __('Fecha de creación') }}</p>
+                                                <p class="mt-1 text-sm font-semibold text-gray-900 dark:text-gray-100">{{ optional($run->created_at)->format('d/m/Y H:i') ?? __('N/D') }}</p>
+                                            </div>
+                                            <div class="rounded-2xl border border-gray-200 p-4 dark:border-gray-700">
+                                                <p class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">{{ __('Fecha de ejecución') }}</p>
+                                                <p class="mt-1 text-sm font-semibold text-gray-900 dark:text-gray-100">
+                                                    @php
+                                                        $completedStatuses = ['completed', 'failed', 'cancelled'];
+                                                        $executionDate = in_array($run->status, $completedStatuses) ? $run->updated_at : null;
+                                                    @endphp
+                                                    {{ optional($executionDate)->format('d/m/Y H:i') ?? __('N/D') }}
+                                                </p>
+                                            </div>
+                                            <div class="rounded-2xl border border-gray-200 p-4 dark:border-gray-700">
+                                                <p class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">{{ __('Duración (minutos)') }}</p>
+                                                <p class="mt-1 text-sm font-semibold text-gray-900 dark:text-gray-100">
+                                                    @php
+                                                        $completedStatuses = ['completed', 'failed', 'cancelled'];
+                                                        if (in_array($run->status, $completedStatuses) && $run->created_at && $run->updated_at) {
+                                                            $durationMinutes = (int) ceil($run->created_at->diffInMinutes($run->updated_at));
+                                                        } else {
+                                                            $durationMinutes = null;
+                                                        }
+                                                    @endphp
+                                                    {{ $durationMinutes ?? __('N/D') }} {{ $durationMinutes ? __('min') : '' }}
+                                                </p>
+                                            </div>
+                                        </div>
+
+                                        {{-- Archivos de Insumo --}}
+                                        <div class="mt-6">
+                                            <h4 class="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3">
+                                                <i class="fa-solid fa-folder-open mr-2 text-primary"></i>
+                                                {{ __('Archivos de Insumo') }}
+                                            </h4>
+                                            <div class="max-h-48 space-y-2 overflow-y-auto pr-1">
+                                                @forelse ($run->files as $file)
+                                                    <div class="rounded-2xl border border-gray-200 p-3 dark:border-gray-700">
+                                                        <p class="text-sm font-semibold text-gray-900 dark:text-gray-100">{{ $file->original_name }}</p>
+                                                        <p class="text-xs text-gray-500 dark:text-gray-400">
+                                                            {{ $file->dataSource?->name ?? __('Sin origen') }}
+                                                            •
+                                                            {{ $file->uploader?->name ?? __('Sin usuario') }}
+                                                            •
+                                                            {{ optional($file->created_at)->format('d/m/Y H:i') ?? __('Sin fecha') }}
+                                                        </p>
+                                                    </div>
+                                                @empty
+                                                    <p class="text-sm text-gray-500 dark:text-gray-400">{{ __('No hay archivos asignados a este comunicado.') }}</p>
+                                                @endforelse
+                                            </div>
                                         </div>
 
                                         <div class="mt-6 flex justify-end">
                                             <button
                                                 type="button"
                                                 class="inline-flex items-center rounded-full bg-primary px-4 py-2 text-sm font-semibold text-white transition hover:bg-primary-600 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 focus:ring-offset-white dark:focus:ring-offset-gray-800"
-                                                x-on:click="openFiles = false"
+                                                x-on:click="openRunDetails = false"
                                             >
                                                 {{ __('Cerrar') }}
                                             </button>
@@ -276,11 +358,103 @@
                                     </div>
                                 </div>
 
-                                {{-- Modal Ver Errores --}}
+                            {{-- Modal Archivos de Resultados --}}
                                 <div
                                     x-cloak
-                                    x-show="openErrors"
+                                    x-show="openResultFiles"
                                     x-transition.opacity
+                                    class="fixed inset-0 z-50 flex items-center justify-center"
+                                    aria-modal="true"
+                                    role="dialog"
+                                >
+                                    <div class="absolute inset-0 bg-gray-900/50" x-on:click="openResultFiles = false"></div>
+
+                                    <div class="relative z-10 w-full max-w-2xl rounded-3xl bg-white p-6 shadow-2xl dark:bg-gray-800">
+                                        <div class="flex items-center justify-between">
+                                            <h3 class="text-h5 font-semibold text-gray-900 dark:text-gray-100">
+                                                <i class="fa-solid fa-folder-open mr-2 text-green-600"></i>
+                                                {{ __('Archivos de Resultados') }}
+                                            </h3>
+                                            <button
+                                                type="button"
+                                                class="rounded-full p-2 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-500"
+                                                x-on:click="openResultFiles = false"
+                                                aria-label="{{ __('Cerrar') }}"
+                                            >
+                                                <i class="fa-solid fa-xmark"></i>
+                                            </button>
+                                        </div>
+
+                                        <div class="mt-6">
+                                            <div class="max-h-96 space-y-3 overflow-y-auto pr-1">
+                                                @forelse ($run->resultFiles as $resultFile)
+                                                    <div class="rounded-2xl border border-gray-200 p-4 hover:border-green-300 hover:bg-green-50/30 dark:border-gray-700 dark:hover:border-green-800 dark:hover:bg-green-900/10 transition">
+                                                        <div class="flex items-start justify-between gap-4">
+                                                            <div class="flex-1 min-w-0">
+                                                                <div class="flex items-center gap-2">
+                                                                    @php
+                                                                        $extension = strtolower(pathinfo($resultFile->file_name, PATHINFO_EXTENSION));
+                                                                        $iconClass = match($extension) {
+                                                                            'xls', 'xlsx' => 'fa-file-excel text-green-600',
+                                                                            'csv' => 'fa-file-csv text-blue-600',
+                                                                            'pdf' => 'fa-file-pdf text-red-600',
+                                                                            default => 'fa-file text-gray-600'
+                                                                        };
+                                                                    @endphp
+                                                                    <i class="fa-solid {{ $iconClass }}"></i>
+                                                                    <p class="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">
+                                                                        {{ $resultFile->file_name }}
+                                                                    </p>
+                                                                </div>
+                                                                <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
+                                                                    <span class="inline-flex items-center gap-1">
+                                                                        <i class="fa-solid fa-tag"></i>
+                                                                        {{ ucfirst(str_replace('_', ' ', $resultFile->file_type)) }}
+                                                                    </span>
+                                                                    <span class="inline-flex items-center gap-1">
+                                                                        <i class="fa-solid fa-database"></i>
+                                                                        {{ number_format($resultFile->records_count) }} {{ __('registros') }}
+                                                                    </span>
+                                                                    <span class="inline-flex items-center gap-1">
+                                                                        <i class="fa-solid fa-weight-hanging"></i>
+                                                                        {{ number_format($resultFile->size / 1024, 2) }} KB
+                                                                    </span>
+                                                                </div>
+                                                            </div>
+                                                            <a
+                                                                href="{{ route('recaudo.comunicados.download-result', ['run' => $run->id, 'resultFile' => $resultFile->id]) }}"
+                                                                class="flex-shrink-0 inline-flex items-center justify-center rounded-full bg-green-600 p-2 text-white transition hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2"
+                                                                title="{{ __('Descargar') }}"
+                                                            >
+                                                                <i class="fa-solid fa-download"></i>
+                                                            </a>
+                                                        </div>
+                                                    </div>
+                                                @empty
+                                                    <p class="text-sm text-gray-500 dark:text-gray-400 text-center py-8">
+                                                        {{ __('No hay archivos de resultados disponibles.') }}
+                                                    </p>
+                                                @endforelse
+                                            </div>
+                                        </div>
+
+                                        <div class="mt-6 flex justify-end">
+                                            <button
+                                                type="button"
+                                                class="inline-flex items-center rounded-full bg-gray-200 dark:bg-gray-700 px-4 py-2 text-sm font-semibold text-gray-700 dark:text-gray-300 transition hover:bg-gray-300 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2"
+                                                x-on:click="openResultFiles = false"
+                                            >
+                                                {{ __('Cerrar') }}
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                            {{-- Modal Ver Errores --}}
+                            <div
+                                x-cloak
+                                x-show="openErrors"
+                                x-transition.opacity
                                     class="fixed inset-0 z-50 flex items-center justify-center"
                                     aria-modal="true"
                                     role="dialog"
@@ -467,43 +641,8 @@
                                         </div>
                                     </div>
                                 </div>
-                            </div>
-
-                            <div class="flex justify-center">
-                                <form
-                                    method="POST"
-                                    action="{{ route('recaudo.comunicados.destroy', $run) }}"
-                                    x-data="{ confirmDelete() { return confirm(@js(__('¿Deseas eliminar este comunicado? Esta acción no se puede deshacer.'))); } }"
-                                >
-                                    @csrf
-                                    @method('DELETE')
-
-                                    <button
-                                        type="submit"
-                                        @click.prevent="
-                                            if (! {{ $canDelete ? 'true' : 'false' }}) {
-                                                return;
-                                            }
-
-                                            if (confirmDelete()) {
-                                                $el.closest('form').submit();
-                                            }
-                                        "
-                                        @disabled(! $canDelete)
-                                        aria-disabled="{{ $canDelete ? 'false' : 'true' }}"
-                                        class="inline-flex items-center justify-center rounded-full p-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-white dark:focus:ring-offset-gray-900 {{
-                                            $canDelete
-                                                ? 'bg-red-100 text-red-600 hover:bg-red-200 focus:ring-red-500'
-                                                : 'cursor-not-allowed bg-gray-200 text-gray-400 dark:bg-gray-700 dark:text-gray-500'
-                                        }}"
-                                        title="{{ $canDelete ? __('Eliminar comunicado') : __('Solo se pueden eliminar comunicados en estado listo.') }}"
-                                    >
-                                        <i class="fa-solid fa-trash"></i>
-                                        <span class="sr-only">{{ __('Eliminar comunicado') }}</span>
-                                    </button>
-                                </form>
-                            </div>
                         </div>
+                        {{-- Cierre del x-data wrapper --}}
                     @empty
                         <div class="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-gray-300 px-6 py-12 text-center text-body text-gray-500 dark:border-gray-700 dark:text-gray-400">
                             <i class="fa-regular fa-envelope-open text-2xl text-gray-400"></i>

@@ -156,7 +156,7 @@ final class CrossBascarWithPagaplStep implements ProcessingStepInterface
         while ($offset < $totalRecords) {
             $rows = DB::select("
                 SELECT
-                    NOW() as fecha_cruce,
+                    TO_CHAR(NOW(), 'DD/MM/YYYY') as fecha_cruce,
                     b.num_tomador as numero_id_aportante,
                     b.periodo,
                     ? as tipo_comunicado,

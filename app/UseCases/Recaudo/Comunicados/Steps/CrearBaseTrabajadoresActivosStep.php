@@ -136,7 +136,7 @@ final class CrearBaseTrabajadoresActivosStep implements ProcessingStepInterface
                     d.NRO_DOCUMTO as nro_idvi,
                     d.RIESGO as cls_rict,
                     d.FECHA_INI_COBERT as fch_invi,
-                    b.NUM_POLI as poliza,
+                    b.NUM_POLIZA as poliza,
                     b.VALOR_TOTAL_FACT as valor_total_fact,
                     b.cantidad_trabajadores,
                     d.TIPO_COTIZANTE as tpo_cot
@@ -159,10 +159,13 @@ final class CrearBaseTrabajadoresActivosStep implements ProcessingStepInterface
                 // Formatear fecha sin guiones
                 $fechaInvi = $this->formatDateWithoutDashes($row->fch_invi);
 
-                // Calcular valor (división con protección contra cero)
+                // Calcular valor (división con protección contra cero y conversión a numérico)
                 $valor = 0;
-                if ($row->cantidad_trabajadores > 0) {
-                    $valor = round($row->valor_total_fact / $row->cantidad_trabajadores, 2);
+                $valorTotalFact = (float) ($row->valor_total_fact ?? 0);
+                $cantidadTrabajadores = (int) ($row->cantidad_trabajadores ?? 0);
+
+                if ($cantidadTrabajadores > 0 && $valorTotalFact > 0) {
+                    $valor = round($valorTotalFact / $cantidadTrabajadores, 2);
                 }
 
                 $csvContent .= sprintf(

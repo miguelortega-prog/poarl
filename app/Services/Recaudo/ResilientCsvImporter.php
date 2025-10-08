@@ -20,7 +20,7 @@ final class ResilientCsvImporter
     /**
      * Tamaño de chunk para procesar (balance entre performance y memoria).
      */
-    private const CHUNK_SIZE = 10000;
+    private const CHUNK_SIZE = 1000;
 
     /**
      * Tamaño máximo de contenido de línea a guardar en log (para evitar bloat).
@@ -86,17 +86,37 @@ final class ResilientCsvImporter
         $errorsLogged = 0;
         $currentLine = 0;
         $chunk = [];
+        $chunksProcessed = 0;
 
         try {
             // Saltar header si existe
             if ($hasHeader) {
                 fgets($handle);
                 $currentLine++;
+                Log::info('Header del CSV skippeado', ['current_line' => $currentLine]);
             }
+
+            Log::info('Iniciando lectura línea por línea del CSV');
 
             while (($line = fgets($handle)) !== false) {
                 $currentLine++;
                 $totalRows++;
+
+                // Log primera línea para debug
+                if ($currentLine === 2) {
+                    Log::info('Primera línea de datos leída', [
+                        'line_number' => $currentLine,
+                        'line_preview' => substr($line, 0, 200),
+                    ]);
+                }
+
+                // Log cada 25000 líneas para monitorear progreso (reducido para evitar ruido)
+                if ($currentLine % 25000 === 0) {
+                    Log::info('CSV - progreso', [
+                        'line' => number_format($currentLine),
+                        'memoria_mb' => round(memory_get_usage(true) / 1024 / 1024, 1),
+                    ]);
+                }
 
                 // Parsear línea CSV
                 $parsedData = str_getcsv($line, $delimiter);
@@ -126,29 +146,48 @@ final class ResilientCsvImporter
                 $rowData['run_id'] = $runId;
                 $rowData['created_at'] = now();
 
-                // Agregar a chunk
+                // Agregar a chunk (sin line_content para ahorrar memoria)
                 $chunk[] = [
                     'data' => $rowData,
                     'line_number' => $currentLine,
-                    'line_content' => $line,
                 ];
 
                 // Procesar chunk cuando alcanza el tamaño
                 if (count($chunk) >= self::CHUNK_SIZE) {
+                    $chunksProcessed++;
+
+                    // Log cada 25 chunks (~25,000 registros) para reducir ruido
+                    if ($chunksProcessed % 25 === 0) {
+                        Log::info('CSV Batch - progreso', [
+                            'chunks' => $chunksProcessed,
+                            'filas_ok' => number_format($successRows),
+                            'filas_error' => number_format($errorRows),
+                        ]);
+                    }
+
                     $result = $this->processChunk($tableName, $chunk, $runId, $dataSourceCode);
                     $successRows += $result['success'];
                     $errorRows += $result['errors'];
                     $errorsLogged += $result['errors_logged'];
+
+                    // Liberar memoria explícitamente
+                    unset($chunk, $result);
                     $chunk = [];
+                    gc_collect_cycles();
                 }
             }
 
             // Procesar chunk restante
             if (count($chunk) > 0) {
+                $chunksProcessed++;
                 $result = $this->processChunk($tableName, $chunk, $runId, $dataSourceCode);
                 $successRows += $result['success'];
                 $errorRows += $result['errors'];
                 $errorsLogged += $result['errors_logged'];
+
+                // Liberar memoria del último chunk
+                unset($chunk, $result);
+                gc_collect_cycles();
             }
         } finally {
             fclose($handle);
@@ -168,6 +207,7 @@ final class ResilientCsvImporter
             'table' => $tableName,
             'run_id' => $runId,
             'data_source' => $dataSourceCode,
+            'chunks_processed' => $chunksProcessed,
             'total_rows' => $totalRows,
             'success_rows' => $successRows,
             'error_rows' => $errorRows,
@@ -236,22 +276,20 @@ final class ResilientCsvImporter
             ]);
         }
 
-        // Fallback: Procesar línea por línea con transacción individual
+        // Fallback: Procesar línea por línea SIN transacción individual (más rápido)
+        // No usamos transacciones individuales porque el volumen de inserts es alto
+        // y el overhead de 10k transacciones es prohibitivo
         foreach ($chunk as $item) {
-            DB::beginTransaction();
             try {
                 DB::table($tableName)->insert($item['data']);
-                DB::commit();
                 $success++;
             } catch (\Throwable $e) {
-                DB::rollBack();
-
                 $this->logError(
                     $runId,
                     $dataSourceCode,
                     $tableName,
                     $item['line_number'],
-                    $item['line_content'],
+                    '', // No tenemos line_content en memoria (optimización)
                     'insert_error',
                     $e->getMessage()
                 );

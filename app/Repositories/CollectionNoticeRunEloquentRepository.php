@@ -18,6 +18,7 @@ final class CollectionNoticeRunEloquentRepository implements CollectionNoticeRun
             'collection_notice_type_id' => $dto->collectionNoticeTypeId,
             'period'                    => $dto->periodValue,
             'requested_by_id'           => $dto->requestedById,
+            'official_id'               => $dto->officialId,
             'status'                    => CollectionNoticeRunStatus::PENDING->value,
         ]);
     }
@@ -25,7 +26,10 @@ final class CollectionNoticeRunEloquentRepository implements CollectionNoticeRun
     public function findWithFiles(int $id): ?CollectionNoticeRun
     {
         return CollectionNoticeRun::query()
-            ->with(['files:id,collection_notice_run_id,disk,path'])
+            ->with([
+                'files:id,collection_notice_run_id,disk,path',
+                'resultFiles:id,collection_notice_run_id,disk,path',
+            ])
             ->find($id);
     }
 

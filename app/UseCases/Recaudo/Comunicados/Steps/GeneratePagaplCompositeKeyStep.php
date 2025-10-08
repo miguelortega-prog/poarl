@@ -13,7 +13,7 @@ use Illuminate\Support\Facades\Log;
  * Step: Generar llave compuesta en PAGAPL.
  *
  * Genera el campo 'composite_key' concatenando:
- * - identificacion (NIT/CC del aportante)
+ * - identifi (NIT/CC del aportante)
  * - periodo (periodo del pago en formato YYYYMM)
  *
  * Esta llave se usará para cruzar con BASCAR y determinar qué pagos
@@ -21,8 +21,8 @@ use Illuminate\Support\Facades\Log;
  *
  * Operación SQL:
  * UPDATE data_source_pagapl
- * SET composite_key = TRIM(identificacion) || periodo
- * WHERE run_id = X AND identificacion IS NOT NULL AND periodo IS NOT NULL
+ * SET composite_key = TRIM(identifi) || periodo
+ * WHERE run_id = X AND identifi IS NOT NULL AND periodo IS NOT NULL
  */
 final class GeneratePagaplCompositeKeyStep implements ProcessingStepInterface
 {
@@ -66,13 +66,13 @@ final class GeneratePagaplCompositeKeyStep implements ProcessingStepInterface
             ]);
         }
 
-        // Generar composite_key = TRIM(identificacion) || periodo
+        // Generar composite_key = TRIM(identifi) || periodo
         $updated = DB::update("
             UPDATE {$tableName}
-            SET composite_key = TRIM(identificacion) || periodo
+            SET composite_key = TRIM(identifi) || periodo
             WHERE run_id = ?
-                AND identificacion IS NOT NULL
-                AND identificacion != ''
+                AND identifi IS NOT NULL
+                AND identifi != ''
                 AND periodo IS NOT NULL
                 AND periodo != ''
         ", [$run->id]);
@@ -91,8 +91,8 @@ final class GeneratePagaplCompositeKeyStep implements ProcessingStepInterface
         $missingIdentificacion = DB::table($tableName)
             ->where('run_id', $run->id)
             ->where(function ($query) {
-                $query->whereNull('identificacion')
-                      ->orWhere('identificacion', '');
+                $query->whereNull('identifi')
+                      ->orWhere('identifi', '');
             })
             ->count();
 
@@ -106,9 +106,9 @@ final class GeneratePagaplCompositeKeyStep implements ProcessingStepInterface
 
         // Logs de resultados
         if ($missingIdentificacion > 0) {
-            Log::warning('⚠️  Algunas filas no tienen identificacion', [
+            Log::warning('⚠️  Algunas filas no tienen identifi', [
                 'run_id' => $run->id,
-                'missing_identificacion' => $missingIdentificacion,
+                'missing_identifi' => $missingIdentificacion,
             ]);
         }
 
@@ -125,7 +125,7 @@ final class GeneratePagaplCompositeKeyStep implements ProcessingStepInterface
             'run_id' => $run->id,
             'total_rows' => $totalRows,
             'keys_generated' => $keysGenerated,
-            'missing_identificacion' => $missingIdentificacion,
+            'missing_identifi' => $missingIdentificacion,
             'missing_periodo' => $missingPeriodo,
             'coverage_pct' => $totalRows > 0 ? round(($keysGenerated / $totalRows) * 100, 2) : 0,
             'duration_ms' => $duration,
@@ -135,7 +135,7 @@ final class GeneratePagaplCompositeKeyStep implements ProcessingStepInterface
         if ($keysGenerated === 0) {
             throw new \RuntimeException(
                 "No se generaron llaves compuestas en PAGAPL. " .
-                "Verifica que identificacion y periodo no estén vacíos."
+                "Verifica que identifi y periodo no estén vacíos."
             );
         }
     }

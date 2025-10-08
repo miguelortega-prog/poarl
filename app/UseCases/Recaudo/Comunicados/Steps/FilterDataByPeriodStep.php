@@ -19,9 +19,10 @@ use Illuminate\Support\Facades\Log;
  *    - Se procesan todos los registros
  *
  * 2. Si periodo = YYYYMM (ej: "202508"):
- *    - En DETTRA: Crea columna 'periodo' extrayendo de FECHA_INICIO_VIG (DD/MM/YYYY → YYYYMM)
- *    - En DETTRA: Elimina registros donde periodo != periodo_run
- *    - TODO: Filtros adicionales en otras tablas según se definan
+ *    - En BASCAR: Crea columna 'periodo' extrayendo de fecha_inicio_vig (DD/MM/YYYY → YYYYMM)
+ *    - En BASCAR: Elimina registros donde periodo != periodo_run
+ *    - En PAGAPL: Filtra por sheet_name que contenga el año (YYYY) del periodo
+ *    - En PAGAPL: Elimina hojas donde sheet_name no contenga el año
  */
 final class FilterDataByPeriodStep implements ProcessingStepInterface
 {
@@ -61,8 +62,8 @@ final class FilterDataByPeriodStep implements ProcessingStepInterface
             'period' => $run->period,
         ]);
 
-        // Filtrar DETTRA por periodo (YYYYMM)
-        $this->filterDettraByPeriod($run);
+        // Filtrar BASCAR por periodo (YYYYMM)
+        $this->filterBascarByPeriod($run);
 
         // Filtrar PAGAPL por año en sheet_name
         $this->filterPagaplBySheetName($run);
@@ -79,18 +80,18 @@ final class FilterDataByPeriodStep implements ProcessingStepInterface
     }
 
     /**
-     * Filtra tabla DETTRA por periodo:
+     * Filtra tabla BASCAR por periodo:
      * 1. Crea columna 'periodo' si no existe
-     * 2. Extrae periodo de FECHA_INICIO_VIG (DD/MM/YYYY → YYYYMM)
+     * 2. Extrae periodo de fecha_inicio_vig (DD/MM/YYYY → YYYYMM)
      * 3. Elimina registros que no correspondan al periodo del run
      */
-    private function filterDettraByPeriod(CollectionNoticeRun $run): void
+    private function filterBascarByPeriod(CollectionNoticeRun $run): void
     {
-        $tableName = 'data_source_dettra';
+        $tableName = 'data_source_bascar';
         $runId = $run->id;
         $targetPeriod = $run->period;
 
-        Log::info('🔧 Procesando DETTRA: Extrayendo y filtrando por periodo', [
+        Log::info('🔧 Procesando BASCAR: Extrayendo y filtrando por periodo', [
             'run_id' => $runId,
             'table' => $tableName,
             'target_period' => $targetPeriod,
@@ -98,7 +99,7 @@ final class FilterDataByPeriodStep implements ProcessingStepInterface
 
         // Paso 1: Agregar columna 'periodo' si no existe
         if (!$this->columnExists($tableName, 'periodo')) {
-            Log::info('Creando columna periodo en DETTRA', [
+            Log::info('Creando columna periodo en BASCAR', [
                 'run_id' => $runId,
                 'table' => $tableName,
             ]);
@@ -114,9 +115,10 @@ final class FilterDataByPeriodStep implements ProcessingStepInterface
             ]);
         }
 
-        // Paso 2: Extraer periodo de FECHA_INICIO_VIG (formato DD/MM/YYYY)
-        // Ejemplo: "15/08/2025" → "202508"
-        Log::info('Extrayendo periodo de FECHA_INICIO_VIG', [
+        // Paso 2: Extraer periodo de fecha_inicio_vig separando por '/'
+        // Formato: D/MM/YYYY o DD/MM/YYYY → YYYYMM
+        // Ejemplo: "1/08/2025" → "202508", "15/08/2025" → "202508"
+        Log::info('Extrayendo periodo de fecha_inicio_vig', [
             'run_id' => $runId,
             'table' => $tableName,
         ]);
@@ -124,16 +126,16 @@ final class FilterDataByPeriodStep implements ProcessingStepInterface
         $updated = DB::statement("
             UPDATE {$tableName}
             SET periodo = CONCAT(
-                SUBSTRING(FECHA_INICIO_VIG, 7, 4),  -- Año (YYYY)
-                SUBSTRING(FECHA_INICIO_VIG, 4, 2)   -- Mes (MM)
+                SPLIT_PART(fecha_inicio_vig, '/', 3),  -- Año (YYYY)
+                LPAD(SPLIT_PART(fecha_inicio_vig, '/', 2), 2, '0')  -- Mes (MM) con padding
             )
             WHERE run_id = ?
-            AND FECHA_INICIO_VIG IS NOT NULL
-            AND FECHA_INICIO_VIG != ''
-            AND FECHA_INICIO_VIG LIKE '__/__/____'  -- Validar formato DD/MM/YYYY
+            AND fecha_inicio_vig IS NOT NULL
+            AND fecha_inicio_vig != ''
+            AND fecha_inicio_vig ~ '^[0-9]{1,2}/[0-9]{1,2}/[0-9]{4}$'  -- Validar formato D/M/YYYY
         ", [$runId]);
 
-        Log::info('✅ Periodo extraído de FECHA_INICIO_VIG', [
+        Log::info('✅ Periodo extraído de fecha_inicio_vig', [
             'run_id' => $runId,
             'table' => $tableName,
         ]);
@@ -148,7 +150,7 @@ final class FilterDataByPeriodStep implements ProcessingStepInterface
             ->where('periodo', $targetPeriod)
             ->count();
 
-        Log::info('Registros por periodo en DETTRA', [
+        Log::info('Registros por periodo en BASCAR', [
             'run_id' => $runId,
             'total_records' => $totalBefore,
             'matching_period' => $matchingPeriod,
@@ -162,7 +164,7 @@ final class FilterDataByPeriodStep implements ProcessingStepInterface
             ->where('periodo', '!=', $targetPeriod)
             ->delete();
 
-        Log::info('✅ Registros eliminados de DETTRA por periodo', [
+        Log::info('✅ Registros eliminados de BASCAR por periodo', [
             'run_id' => $runId,
             'table' => $tableName,
             'deleted' => $deleted,
@@ -172,7 +174,7 @@ final class FilterDataByPeriodStep implements ProcessingStepInterface
 
         // Validar que quedaron registros
         if ($matchingPeriod === 0) {
-            Log::warning('⚠️  No quedaron registros en DETTRA después de filtrar por periodo', [
+            Log::warning('⚠️  No quedaron registros en BASCAR después de filtrar por periodo', [
                 'run_id' => $runId,
                 'period' => $targetPeriod,
             ]);

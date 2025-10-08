@@ -12,23 +12,22 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Step: Excluir PSI con Persona Jurídica (9 dígitos).
+ * Step: Excluir registros sin datos de contacto.
  *
- * Identifica aportantes que tienen PSI = 'S' y NIT de 9 dígitos (persona jurídica)
+ * Identifica aportantes que no tienen tipo_de_envio (sin email ni dirección)
  * y los excluye del proceso:
  *
  * Criterios de exclusión:
- * - psi = 'S' (mayúscula o minúscula)
- * - NUM_TOMADOR tiene exactamente 9 dígitos
+ * - tipo_de_envio IS NULL (sin email ni dirección válida)
  *
  * Acciones:
  * 1. Identifica registros que cumplen los criterios
  * 2. Los agrega al archivo de excluidos (excluidos{run_id}.csv)
  * 3. Elimina estos registros de data_source_bascar
  *
- * Motivo de exclusión: "PSI Persona Jurídica"
+ * Motivo de exclusión: "Sin datos de contacto"
  */
-final class ExcludePsiPersonaJuridicaStep implements ProcessingStepInterface
+final class ExcludeSinDatosContactoStep implements ProcessingStepInterface
 {
     public function __construct(
         private readonly FilesystemFactory $filesystem
@@ -37,29 +36,29 @@ final class ExcludePsiPersonaJuridicaStep implements ProcessingStepInterface
 
     public function getName(): string
     {
-        return 'Excluir PSI Persona Jurídica';
+        return 'Excluir registros sin datos de contacto';
     }
 
     public function execute(CollectionNoticeRun $run): void
     {
         $startTime = microtime(true);
 
-        Log::info('🚫 Excluyendo PSI Persona Jurídica (9 dígitos)', [
+        Log::info('🚫 Excluyendo registros sin datos de contacto', [
             'step' => self::class,
             'run_id' => $run->id,
         ]);
 
         // Contar registros que cumplen criterio de exclusión
-        $toExcludeCount = $this->countPsiPersonaJuridica($run);
+        $toExcludeCount = $this->countSinDatosContacto($run);
 
         if ($toExcludeCount === 0) {
-            Log::info('No hay registros PSI Persona Jurídica para excluir', [
+            Log::info('No hay registros sin datos de contacto para excluir', [
                 'run_id' => $run->id,
             ]);
             return;
         }
 
-        Log::info('Registros a excluir (PSI Persona Jurídica)', [
+        Log::info('Registros a excluir (sin datos de contacto)', [
             'run_id' => $run->id,
             'count' => $toExcludeCount,
         ]);
@@ -68,11 +67,11 @@ final class ExcludePsiPersonaJuridicaStep implements ProcessingStepInterface
         $this->appendToExcludedFile($run, $toExcludeCount);
 
         // Eliminar registros de BASCAR
-        $deleted = $this->deletePsiPersonaJuridicaFromBascar($run);
+        $deleted = $this->deleteSinDatosContactoFromBascar($run);
 
         $duration = (int) ((microtime(true) - $startTime) * 1000);
 
-        Log::info('✅ Exclusión de PSI Persona Jurídica completada', [
+        Log::info('✅ Exclusión de registros sin datos de contacto completada', [
             'run_id' => $run->id,
             'excluded_count' => $toExcludeCount,
             'deleted_count' => $deleted,
@@ -81,17 +80,15 @@ final class ExcludePsiPersonaJuridicaStep implements ProcessingStepInterface
     }
 
     /**
-     * Cuenta registros que cumplen criterio PSI Persona Jurídica.
+     * Cuenta registros sin datos de contacto (tipo_de_envio IS NULL).
      */
-    private function countPsiPersonaJuridica(CollectionNoticeRun $run): int
+    private function countSinDatosContacto(CollectionNoticeRun $run): int
     {
         return (int) DB::selectOne("
             SELECT COUNT(*) as count
             FROM data_source_bascar
             WHERE run_id = ?
-                AND UPPER(psi) = 'S'
-                AND LENGTH(NUM_TOMADOR) = 9
-                AND NUM_TOMADOR IS NOT NULL
+                AND tipo_de_envio IS NULL
         ", [$run->id])->count;
     }
 
@@ -110,7 +107,7 @@ final class ExcludePsiPersonaJuridicaStep implements ProcessingStepInterface
         $fileExists = $disk->exists($relativePath);
         $existingContent = $fileExists ? $disk->get($relativePath) : '';
 
-        Log::info('Agregando registros a archivo de excluidos', [
+        Log::info('Agregando registros sin datos de contacto a archivo de excluidos', [
             'run_id' => $run->id,
             'total_records' => $totalRecords,
             'file' => $fileName,
@@ -144,13 +141,11 @@ final class ExcludePsiPersonaJuridicaStep implements ProcessingStepInterface
                     NUM_TOMADOR as numero_id_aportante,
                     periodo,
                     ? as tipo_comunicado,
-                    valor_total_fact as valor,
-                    'PSI Persona Jurídica' as motivo_exclusion
+                    VALOR_TOTAL_FACT as valor,
+                    'Sin datos de contacto' as motivo_exclusion
                 FROM data_source_bascar
                 WHERE run_id = ?
-                    AND UPPER(psi) = 'S'
-                    AND LENGTH(NUM_TOMADOR) = 9
-                    AND NUM_TOMADOR IS NOT NULL
+                    AND tipo_de_envio IS NULL
                 ORDER BY id
                 LIMIT ?
                 OFFSET ?
@@ -160,8 +155,8 @@ final class ExcludePsiPersonaJuridicaStep implements ProcessingStepInterface
                 $newContent .= sprintf(
                     "%s;%s;%s;%s;%s;%s\n",
                     $row->fecha_cruce,
-                    $row->numero_id_aportante,
-                    $row->periodo,
+                    $row->numero_id_aportante ?? '',
+                    $row->periodo ?? '',
                     $row->tipo_comunicado,
                     $row->valor ?? '',
                     $row->motivo_exclusion
@@ -189,7 +184,7 @@ final class ExcludePsiPersonaJuridicaStep implements ProcessingStepInterface
                 'records_count' => ($existingFile->records_count ?? 0) + $processedRows,
                 'metadata' => array_merge($existingFile->metadata ?? [], [
                     'updated_at' => now()->toIso8601String(),
-                    'psi_persona_juridica_added' => $processedRows,
+                    'sin_datos_contacto_added' => $processedRows,
                 ]),
             ]);
 
@@ -212,7 +207,7 @@ final class ExcludePsiPersonaJuridicaStep implements ProcessingStepInterface
                 'records_count' => $processedRows,
                 'metadata' => [
                     'generated_at' => now()->toIso8601String(),
-                    'step' => 'exclude_psi_persona_juridica',
+                    'step' => 'exclude_sin_datos_contacto',
                     'tipo_comunicado' => $tipoComunicado,
                 ],
             ]);
@@ -227,23 +222,21 @@ final class ExcludePsiPersonaJuridicaStep implements ProcessingStepInterface
     }
 
     /**
-     * Elimina registros PSI Persona Jurídica de BASCAR.
+     * Elimina registros sin datos de contacto de BASCAR.
      */
-    private function deletePsiPersonaJuridicaFromBascar(CollectionNoticeRun $run): int
+    private function deleteSinDatosContactoFromBascar(CollectionNoticeRun $run): int
     {
-        Log::info('Eliminando registros PSI Persona Jurídica de BASCAR', [
+        Log::info('Eliminando registros sin datos de contacto de BASCAR', [
             'run_id' => $run->id,
         ]);
 
         $deleted = DB::delete("
             DELETE FROM data_source_bascar
             WHERE run_id = ?
-                AND UPPER(psi) = 'S'
-                AND LENGTH(NUM_TOMADOR) = 9
-                AND NUM_TOMADOR IS NOT NULL
+                AND tipo_de_envio IS NULL
         ", [$run->id]);
 
-        Log::info('✅ Registros eliminados de BASCAR', [
+        Log::info('✅ Registros sin datos de contacto eliminados de BASCAR', [
             'run_id' => $run->id,
             'deleted_count' => $deleted,
         ]);

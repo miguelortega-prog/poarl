@@ -38,8 +38,11 @@ final class ProcessCollectionDataJob implements ShouldQueue
 
     /**
      * Número de intentos del job.
+     * SIN REINTENTOS: el procesamiento SQL opera sobre datos ya cargados,
+     * si falla es por error de lógica de negocio o validación, no transitorio.
+     * Los reintentos duplicarían esfuerzo sin resolver el problema de fondo.
      */
-    public int $tries = 3;
+    public int $tries = 1;
 
     /**
      * Tiempo máximo de ejecución (30 minutos).
