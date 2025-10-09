@@ -17,6 +17,7 @@ class DatabaseSeeder extends Seeder
         $this->call(AreaSeeder::class);
         $this->call(SubdepartmentSeeder::class);
         $this->call(TeamSeeder::class);
+        $this->call(AdminUserSeeder::class); // Crear usuario admin antes de los menús
         $this->call(MenuSeeder::class);
         $this->call(CityDeptoSeeder::class);
         $this->call([

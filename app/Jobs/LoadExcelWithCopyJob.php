@@ -90,30 +90,13 @@ class LoadExcelWithCopyJob implements ShouldQueue
             throw new \RuntimeException("Data source no soportado: {$this->dataSourceCode}");
         }
 
-        Log::info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-        Log::info('🚀 INICIANDO IMPORTACIÓN EXCEL');
-        Log::info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-        Log::info('📊 Data Source: ' . $this->dataSourceCode);
-        Log::info('📁 Archivo: ' . basename($file->path));
-        Log::info('💾 Tamaño: ' . round($file->size / 1024 / 1024, 2) . ' MB');
-        Log::info('🎯 Tabla destino: ' . $tableName);
-        Log::info('⚙️  Método: Go Excelize → PostgreSQL COPY');
-        Log::info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-
-        // IDEMPOTENCIA: Limpiar tabla antes de insertar para evitar duplicados
-        Log::info('Limpiando tabla Excel para garantizar idempotencia', [
+        Log::info('Iniciando importación Excel', [
+            'data_source' => $this->dataSourceCode,
             'table' => $tableName,
             'run_id' => $runId,
         ]);
 
         $deleted = DB::table($tableName)->where('run_id', $runId)->delete();
-        if ($deleted > 0) {
-            Log::warning('Registros previos eliminados (idempotencia)', [
-                'table' => $tableName,
-                'run_id' => $runId,
-                'deleted_rows' => $deleted,
-            ]);
-        }
 
         $disk = $filesystem->disk($file->disk);
         $tempDir = 'temp/excel_import_' . $this->fileId;
@@ -127,20 +110,10 @@ class LoadExcelWithCopyJob implements ShouldQueue
                 $tempDir
             );
 
-            Log::info('');
-            Log::info('✅ CONVERSIÓN EXCEL → CSV COMPLETADA');
-            Log::info('📋 Total de hojas: ' . count($conversionResult['sheets']));
-            Log::info('📄 Hojas procesadas: ' . implode(', ', array_keys($conversionResult['sheets'])));
-            Log::info('');
-
             // Paso 2: Obtener columnas de la tabla destino (excluir id y created_at)
             $columns = $this->getTableColumns($tableName);
 
             // Paso 3: Importar cada CSV con COPY FROM STDIN (10-50x más rápido)
-            Log::info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-            Log::info('⬆️  INICIANDO IMPORTACIÓN A BASE DE DATOS');
-            Log::info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-
             $totalRowsImported = 0;
 
             foreach ($conversionResult['sheets'] as $sheetName => $sheetInfo) {
@@ -149,11 +122,6 @@ class LoadExcelWithCopyJob implements ShouldQueue
 
                 // Asegurar que $sheetName sea string (puede venir como int si es numérico)
                 $sheetName = (string) $sheetName;
-
-                Log::info('');
-                Log::info('📄 Procesando hoja: ' . $sheetName);
-                Log::info('   ├─ Filas esperadas: ' . number_format($sheetInfo['rows']));
-                Log::info('   └─ Tamaño: ' . round($sheetInfo['size'] / 1024 / 1024, 2) . ' MB');
 
                 // Paso 1: Normalizar CSV para que tenga todas las columnas de la tabla
                 $normalizedCsv = $this->normalizeCSV($csvPath, $columns, ';', $sheetName);
@@ -176,26 +144,12 @@ class LoadExcelWithCopyJob implements ShouldQueue
                 );
 
                 $totalRowsImported += $result['rows'];
-
-                $rowsPerSecond = $result['duration_ms'] > 0
-                    ? round($result['rows'] / ($result['duration_ms'] / 1000))
-                    : 0;
-
-                Log::info('   ✅ Importación completada');
-                Log::info('   ├─ Registros: ' . number_format($result['rows']));
-                Log::info('   ├─ Duración: ' . round($result['duration_ms'] / 1000, 2) . 's');
-                Log::info('   └─ Velocidad: ' . number_format($rowsPerSecond) . ' filas/seg');
             }
 
-            Log::info('');
-            Log::info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-            Log::info('🎉 IMPORTACIÓN EXCEL COMPLETADA EXITOSAMENTE');
-            Log::info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-            Log::info('📊 Total de hojas: ' . count($conversionResult['sheets']));
-            Log::info('📈 Total de registros: ' . number_format($totalRowsImported));
-            Log::info('✅ Data Source: ' . $this->dataSourceCode);
-            Log::info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-            Log::info('');
+            Log::info('Importación Excel completada', [
+                'data_source' => $this->dataSourceCode,
+                'run_id' => $runId,
+            ]);
 
         } catch (Throwable $exception) {
             Log::error('Error en carga optimizada Excel → COPY', [
@@ -219,11 +173,6 @@ class LoadExcelWithCopyJob implements ShouldQueue
             if ($disk->exists($tempDir)) {
                 $disk->deleteDirectory($tempDir);
             }
-
-            Log::info('CSVs temporales eliminados', [
-                'file_id' => $this->fileId,
-                'temp_dir' => $tempDir,
-            ]);
         }
     }
 
@@ -281,14 +230,6 @@ class LoadExcelWithCopyJob implements ShouldQueue
             $index = array_search($expectedColLower, $csvHeadersLower);
             $columnMapping[$expectedCol] = $index !== false ? $index : null;
         }
-
-        // Log para debugging
-        Log::info('Normalizando CSV', [
-            'csv_path' => basename($csvPath),
-            'expected_columns' => count($expectedColumns),
-            'sheet_name' => $sheetName,
-            'has_sheet_name_column' => in_array('sheet_name', $expectedColumns),
-        ]);
 
         // Escribir header normalizado usando fputcsv para manejar comillas correctamente
         fputcsv($output, $expectedColumns, $delimiter, '"', '\\');
@@ -378,15 +319,7 @@ class LoadExcelWithCopyJob implements ShouldQueue
                 $file = CollectionNoticeRunFile::find($this->fileId);
                 if ($file) {
                     $runId = $file->collection_notice_run_id;
-                    $deleted = DB::table($tableName)->where('run_id', $runId)->delete();
-
-                    if ($deleted > 0) {
-                        Log::warning('Datos parciales eliminados después del fallo', [
-                            'table' => $tableName,
-                            'run_id' => $runId,
-                            'deleted_rows' => $deleted,
-                        ]);
-                    }
+                    DB::table($tableName)->where('run_id', $runId)->delete();
                 }
             } catch (Throwable $e) {
                 Log::error('Error al limpiar datos parciales en failed()', [
