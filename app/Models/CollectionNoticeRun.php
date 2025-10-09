@@ -16,6 +16,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property int|null $collection_notice_type_id
  * @property string|null $period
  * @property int|null $requested_by_id
+ * @property string|null $official_id
  * @property \Illuminate\Support\Carbon|null $started_at
  * @property \Illuminate\Support\Carbon|null $validated_at
  * @property \Illuminate\Support\Carbon|null $completed_at
@@ -36,6 +37,7 @@ class CollectionNoticeRun extends Model
         'collection_notice_type_id',
         'period',
         'requested_by_id',
+        'official_id',
         'started_at',
         'validated_at',
         'completed_at',

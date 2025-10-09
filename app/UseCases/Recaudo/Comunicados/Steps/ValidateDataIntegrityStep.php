@@ -35,6 +35,8 @@ final class ValidateDataIntegrityStep implements ProcessingStepInterface
         'DETTRA' => 'data_source_dettra',
         'PAGAPL' => 'data_source_pagapl',
         'PAGPLA' => 'data_source_pagpla',
+        'BASACT' => 'data_source_basact',
+        'PAGLOG' => 'data_source_paglog',
     ];
 
     public function getName(): string
@@ -44,24 +46,11 @@ final class ValidateDataIntegrityStep implements ProcessingStepInterface
 
     public function execute(CollectionNoticeRun $run): void
     {
-        $startTime = microtime(true);
-
-        Log::info('🔍 Validando integridad de datos cargados por jobs previos', [
-            'step' => self::class,
-            'run_id' => $run->id,
-        ]);
+        Log::info('Validando integridad de datos', ['run_id' => $run->id]);
 
         // Obtener data sources esperados del tipo de comunicado
         $expectedDataSources = $run->type->dataSources;
-
-        Log::info('Data sources esperados según tipo de comunicado', [
-            'run_id' => $run->id,
-            'expected' => $expectedDataSources->pluck('code')->toArray(),
-        ]);
-
-        $validationResults = [];
         $errors = [];
-        $totalRecords = 0;
 
         // Validar cada data source esperado
         foreach ($expectedDataSources as $dataSource) {
@@ -69,10 +58,6 @@ final class ValidateDataIntegrityStep implements ProcessingStepInterface
 
             if (!isset(self::TABLE_MAP[$code])) {
                 $errors[] = "Data source {$code} no tiene tabla mapeada";
-                Log::error('❌ Data source sin tabla mapeada', [
-                    'run_id' => $run->id,
-                    'data_source' => $code,
-                ]);
                 continue;
             }
 
@@ -85,22 +70,11 @@ final class ValidateDataIntegrityStep implements ProcessingStepInterface
 
             if ($recordCount === 0) {
                 $errors[] = "Data source {$code} no tiene registros en BD (tabla: {$tableName})";
-                Log::error('❌ Data source sin registros', [
-                    'run_id' => $run->id,
-                    'data_source' => $code,
-                    'table' => $tableName,
-                ]);
                 continue;
             }
 
             // Validación 2: Validar columnas
             $columnValidation = $this->validateColumns($tableName, $dataSource);
-
-            $validationResults[$code] = [
-                'table' => $tableName,
-                'records' => $recordCount,
-                'column_validation' => $columnValidation,
-            ];
 
             if (!empty($columnValidation['missing_columns'])) {
                 $errors[] = sprintf(
@@ -110,42 +84,15 @@ final class ValidateDataIntegrityStep implements ProcessingStepInterface
                     implode(', ', $columnValidation['missing_columns'])
                 );
             }
-
-            $totalRecords += $recordCount;
-
-            Log::info('✅ Data source validado', [
-                'run_id' => $run->id,
-                'data_source' => $code,
-                'table' => $tableName,
-                'records' => number_format($recordCount),
-                'expected_columns' => $columnValidation['expected_count'],
-                'actual_columns' => $columnValidation['actual_count'],
-                'missing_columns' => $columnValidation['missing_columns'],
-                'extra_columns' => $columnValidation['extra_columns'],
-            ]);
         }
-
-        $duration = (int) ((microtime(true) - $startTime) * 1000);
 
         // Si hay errores, lanzar excepción
         if (!empty($errors)) {
-            $errorMessage = "Validación de integridad FALLÓ:\n" . implode("\n", $errors);
-
-            Log::error('❌ Validación de integridad FALLÓ', [
-                'run_id' => $run->id,
-                'errors' => $errors,
-                'validation_results' => $validationResults,
-            ]);
-
-            throw new RuntimeException($errorMessage);
+            Log::error('Validación de integridad FALLÓ', ['run_id' => $run->id, 'errors' => $errors]);
+            throw new RuntimeException("Validación de integridad FALLÓ:\n" . implode("\n", $errors));
         }
 
-        Log::info('✅ Validación de integridad completada exitosamente', [
-            'run_id' => $run->id,
-            'data_sources_validated' => count($validationResults),
-            'total_records_loaded' => number_format($totalRecords),
-            'duration_ms' => $duration,
-        ]);
+        Log::info('Validación de integridad completada', ['run_id' => $run->id]);
     }
 
     /**

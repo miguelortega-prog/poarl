@@ -44,27 +44,13 @@ final class SanitizeNumericFieldsStep implements ProcessingStepInterface
 
     public function execute(CollectionNoticeRun $run): void
     {
-        $startTime = microtime(true);
-
-        Log::info('🧹 Sanitizando campos numéricos en data sources', [
-            'step' => self::class,
-            'run_id' => $run->id,
-        ]);
-
-        $totalFieldsSanitized = 0;
+        Log::info('Sanitizando campos numéricos', ['run_id' => $run->id]);
 
         foreach (self::NUMERIC_FIELDS as $tableName => $columns) {
-            $sanitizedInTable = $this->sanitizeTableFields($tableName, $columns, $run);
-            $totalFieldsSanitized += $sanitizedInTable;
+            $this->sanitizeTableFields($tableName, $columns, $run);
         }
 
-        $duration = (int) ((microtime(true) - $startTime) * 1000);
-
-        Log::info('✅ Sanitización de campos numéricos completada', [
-            'run_id' => $run->id,
-            'total_fields_sanitized' => $totalFieldsSanitized,
-            'duration_ms' => $duration,
-        ]);
+        Log::info('Sanitización de campos numéricos completada', ['run_id' => $run->id]);
     }
 
     /**
@@ -73,53 +59,27 @@ final class SanitizeNumericFieldsStep implements ProcessingStepInterface
      * @param string $tableName Nombre de la tabla
      * @param array<string> $columns Lista de columnas a sanitizar
      * @param CollectionNoticeRun $run Run actual
-     * @return int Número de campos sanitizados
      */
-    private function sanitizeTableFields(string $tableName, array $columns, CollectionNoticeRun $run): int
+    private function sanitizeTableFields(string $tableName, array $columns, CollectionNoticeRun $run): void
     {
-        Log::info('Sanitizando campos numéricos en tabla', [
-            'table' => $tableName,
-            'columns' => $columns,
-            'run_id' => $run->id,
-        ]);
-
-        // Contar registros en la tabla antes de sanitizar
-        $recordCount = DB::table($tableName)
-            ->where('run_id', $run->id)
-            ->count();
+        $recordCount = DB::table($tableName)->where('run_id', $run->id)->count();
 
         if ($recordCount === 0) {
-            Log::warning('Tabla sin registros, skipping sanitización', [
-                'table' => $tableName,
-                'run_id' => $run->id,
-            ]);
-            return 0;
+            return;
         }
 
         // Construir SET clause dinámicamente para todas las columnas
         $setClauses = array_map(function ($column) {
-            // REPLACE(REPLACE(columna, '.', ''), ',', '.')
-            // Primero quita puntos (separador de miles), luego convierte coma a punto (decimal)
             return "{$column} = REPLACE(REPLACE({$column}, '.', ''), ',', '.')";
         }, $columns);
 
         $setClause = implode(', ', $setClauses);
 
         // Ejecutar UPDATE masivo
-        $updated = DB::update("
+        DB::update("
             UPDATE {$tableName}
             SET {$setClause}
             WHERE run_id = ?
         ", [$run->id]);
-
-        Log::info('✅ Campos numéricos sanitizados en tabla', [
-            'table' => $tableName,
-            'run_id' => $run->id,
-            'records_in_table' => number_format($recordCount),
-            'records_updated' => number_format($updated),
-            'columns_sanitized' => $columns,
-        ]);
-
-        return count($columns);
     }
 }

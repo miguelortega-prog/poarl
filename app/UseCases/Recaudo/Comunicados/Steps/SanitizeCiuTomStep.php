@@ -35,47 +35,20 @@ final class SanitizeCiuTomStep implements ProcessingStepInterface
 
     public function execute(CollectionNoticeRun $run): void
     {
-        $startTime = microtime(true);
+        Log::info('Sanitizando CIU_TOM', ['run_id' => $run->id]);
 
-        Log::info('🧹 Sanitizando CIU_TOM en BASCAR (nombres → códigos)', [
-            'step' => self::class,
-            'run_id' => $run->id,
-        ]);
-
-        // Paso 1: Obtener valores únicos de CIU_TOM que NO son códigos válidos
         $invalidCiuToms = $this->getInvalidCiuTomValues($run);
 
         if (count($invalidCiuToms) === 0) {
+            Log::info('Sanitización de CIU_TOM completada', ['run_id' => $run->id]);
             return;
         }
 
-        // Paso 2: Procesar cada valor inválido
-        $updated = 0;
-        $ambiguous = 0;
-        $notFound = 0;
-
         foreach ($invalidCiuToms as $ciuTomValue) {
-            $result = $this->processCiuTomValue($ciuTomValue, $run);
-
-            if ($result['status'] === 'updated') {
-                $updated++;
-            } elseif ($result['status'] === 'ambiguous') {
-                $ambiguous++;
-            } else {
-                $notFound++;
-            }
+            $this->processCiuTomValue($ciuTomValue, $run);
         }
 
-        $duration = (int) ((microtime(true) - $startTime) * 1000);
-
-        Log::info('✅ Sanitización de CIU_TOM completada', [
-            'run_id' => $run->id,
-            'total_processed' => count($invalidCiuToms),
-            'updated' => $updated,
-            'ambiguous' => $ambiguous,
-            'not_found' => $notFound,
-            'duration_ms' => $duration,
-        ]);
+        Log::info('Sanitización de CIU_TOM completada', ['run_id' => $run->id]);
     }
 
     /**

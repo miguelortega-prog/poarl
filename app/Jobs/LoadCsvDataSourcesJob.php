@@ -47,11 +47,11 @@ final class LoadCsvDataSourcesJob implements ShouldQueue
 
     /**
      * Número de intentos del job.
-     * 1 intento (sin reintentos) para archivos grandes.
-     * Los reintentos pueden causar colisiones y timeouts en archivos de 150MB+.
+     * 3 intentos para manejar fallas transitorias (conexión DB, locks temporales, etc.).
      * La idempotencia está garantizada limpiando la tabla antes de insertar.
+     * Si falla por timeout o memoria, no vale la pena reintentar (problema de configuración).
      */
-    public int $tries = 1;
+    public int $tries = 3;
 
     /**
      * Tiempo máximo de ejecución (4 horas para archivos CSV grandes con seguridad).
@@ -60,8 +60,18 @@ final class LoadCsvDataSourcesJob implements ShouldQueue
 
     /**
      * Tiempo de espera antes de reintentar (en segundos).
+     * Backoff incremental: 30s, 60s, 120s
      */
-    public int $backoff = 30;
+    public array $backoff = [30, 60, 120];
+
+    /**
+     * Determina el tiempo hasta el cual el job puede ser reintentado.
+     * Después de 8 horas desde que se encola, no se reintenta más.
+     */
+    public function retryUntil(): \DateTime
+    {
+        return now()->addHours(8);
+    }
 
     /**
      * Map de códigos a tablas PostgreSQL.

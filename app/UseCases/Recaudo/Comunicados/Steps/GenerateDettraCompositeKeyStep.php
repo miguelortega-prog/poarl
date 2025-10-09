@@ -10,32 +10,31 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Step: Generar llave compuesta en PAGAPL.
+ * Step: Generar llave compuesta en DETTRA.
  *
  * Genera el campo 'composite_key' concatenando:
- * - identifi (NIT/CC del aportante)
- * - periodo (periodo del pago en formato YYYYMM)
+ * - nit (NIT de la empresa)
+ * - periodo (periodo del run en formato YYYYMM)
  *
- * Esta llave se usará para cruzar con BASCAR y determinar qué pagos
- * ya fueron aplicados (y por tanto excluir esos aportantes del comunicado).
+ * Esta llave se usará para cruces con otras tablas (BASACT, PAGLOG, etc.)
  *
  * Operación SQL:
- * UPDATE data_source_pagapl
- * SET composite_key = TRIM(identifi) || periodo
- * WHERE run_id = X AND identifi IS NOT NULL AND periodo IS NOT NULL
+ * UPDATE data_source_dettra
+ * SET composite_key = TRIM(nit) || 'PERIODO_RUN'
+ * WHERE run_id = X AND nit IS NOT NULL
  */
-final class GeneratePagaplCompositeKeyStep implements ProcessingStepInterface
+final class GenerateDettraCompositeKeyStep implements ProcessingStepInterface
 {
     public function getName(): string
     {
-        return 'Generar llaves compuestas en PAGAPL';
+        return 'Generar llaves compuestas en DETTRA';
     }
 
     public function execute(CollectionNoticeRun $run): void
     {
-        $tableName = 'data_source_pagapl';
+        $tableName = 'data_source_dettra';
 
-        Log::info('Generando llaves compuestas en PAGAPL', ['run_id' => $run->id]);
+        Log::info('Generando llaves compuestas en DETTRA', ['run_id' => $run->id]);
 
         if (!$this->columnExists($tableName, 'composite_key')) {
             DB::statement("ALTER TABLE {$tableName} ADD COLUMN composite_key VARCHAR(255)");
@@ -44,27 +43,26 @@ final class GeneratePagaplCompositeKeyStep implements ProcessingStepInterface
 
         DB::update("
             UPDATE {$tableName}
-            SET composite_key = TRIM(identifi) || periodo
+            SET composite_key = TRIM(nit) || ?
             WHERE run_id = ?
-                AND identifi IS NOT NULL
-                AND identifi != ''
-                AND periodo IS NOT NULL
-                AND periodo != ''
-        ", [$run->id]);
+                AND nit IS NOT NULL
+                AND nit != ''
+        ", [$run->period, $run->id]);
 
+        $totalRows = DB::table($tableName)->where('run_id', $run->id)->count();
         $keysGenerated = DB::table($tableName)
             ->where('run_id', $run->id)
             ->whereNotNull('composite_key')
             ->where('composite_key', '!=', '')
             ->count();
 
-        if ($keysGenerated === 0) {
+        if ($keysGenerated === 0 && $totalRows > 0) {
             throw new \RuntimeException(
-                "No se generaron llaves compuestas en PAGAPL. Verifica que identifi y periodo no estén vacíos."
+                "No se generaron llaves compuestas en DETTRA. Verifica que la columna NIT no esté vacía."
             );
         }
 
-        Log::info('Llaves compuestas generadas en PAGAPL', ['run_id' => $run->id]);
+        Log::info('Llaves compuestas generadas en DETTRA', ['run_id' => $run->id]);
     }
 
     /**

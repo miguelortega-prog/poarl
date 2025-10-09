@@ -42,40 +42,18 @@ final class CrearBaseTrabajadoresActivosStep implements ProcessingStepInterface
 
     public function execute(CollectionNoticeRun $run): void
     {
-        $startTime = microtime(true);
+        Log::info('Creando base de trabajadores activos', ['run_id' => $run->id]);
 
-        Log::info('👷 Creando base de trabajadores activos', [
-            'step' => self::class,
-            'run_id' => $run->id,
-            'period' => $run->period,
-        ]);
-
-        // Contar registros que cruzan
         $totalRecords = $this->countMatchingRecords($run);
 
         if ($totalRecords === 0) {
-            Log::warning('No hay registros de DETTRA que crucen con BASCAR', [
-                'run_id' => $run->id,
-            ]);
+            Log::info('Base de trabajadores activos creada', ['run_id' => $run->id]);
             return;
         }
 
-        Log::info('Registros de trabajadores activos encontrados', [
-            'run_id' => $run->id,
-            'total' => $totalRecords,
-        ]);
+        $this->generateWorkerDetailFile($run, $totalRecords);
 
-        // Generar archivo CSV
-        $filePath = $this->generateWorkerDetailFile($run, $totalRecords);
-
-        $duration = (int) ((microtime(true) - $startTime) * 1000);
-
-        Log::info('✅ Base de trabajadores activos creada', [
-            'run_id' => $run->id,
-            'file_path' => $filePath,
-            'records_count' => $totalRecords,
-            'duration_ms' => $duration,
-        ]);
+        Log::info('Base de trabajadores activos creada', ['run_id' => $run->id]);
     }
 
     /**
@@ -106,26 +84,16 @@ final class CrearBaseTrabajadoresActivosStep implements ProcessingStepInterface
 
         $disk = $this->filesystem->disk('collection');
 
-        // Crear directorio si no existe
         if (!$disk->exists($relativeDir)) {
             $disk->makeDirectory($relativeDir);
         }
 
-        Log::info('Generando archivo de detalle de trabajadores', [
-            'run_id' => $run->id,
-            'total_records' => $totalRecords,
-            'file' => $fileName,
-        ]);
-
-        // Extraer año y mes del período (formato YYYYMM)
         $period = $run->period;
         $year = substr($period, 0, 4);
         $month = substr($period, 4, 2);
 
-        // Generar CSV con encabezado
         $csvContent = "TPO_IDEN_TRABAJADOR;NRO_IDEN;AÑO;MES;TPO_EMP;NRO_IDVI;CLS_RICT;FCH_INVI;PÓLIZA;VALOR;TPO_COT;FCH_FIN;TRAB_EXPUESTOS\n";
 
-        // Procesar en chunks
         $chunkSize = 5000;
         $offset = 0;
         $processedRows = 0;
@@ -158,13 +126,9 @@ final class CrearBaseTrabajadoresActivosStep implements ProcessingStepInterface
             ", [$year, $month, $run->id, $run->id, $chunkSize, $offset]);
 
             foreach ($rows as $row) {
-                // Convertir riesgo a número romano
                 $riesgoRomano = $this->convertToRoman((int) $row->cls_rict);
-
-                // Formatear fecha sin guiones
                 $fechaInvi = $this->formatDateWithoutDashes($row->fch_invi);
 
-                // Calcular valor (división con protección contra cero y conversión a numérico)
                 $valor = 0;
                 $valorTotalFact = (float) ($row->valor_total_fact ?? 0);
                 $cantidadTrabajadores = (int) ($row->cantidad_trabajadores ?? 0);
@@ -193,22 +157,11 @@ final class CrearBaseTrabajadoresActivosStep implements ProcessingStepInterface
             }
 
             $offset += $chunkSize;
-
-            if ($offset % 10000 === 0) {
-                Log::debug('Progreso generación de detalle de trabajadores', [
-                    'run_id' => $run->id,
-                    'processed' => $processedRows,
-                    'total' => $totalRecords,
-                    'percent' => round(($processedRows / $totalRecords) * 100, 1),
-                ]);
-            }
         }
 
-        // Guardar archivo
         $disk->put($relativePath, $csvContent);
         $fileSize = $disk->size($relativePath);
 
-        // Registrar archivo en base de datos
         CollectionNoticeRunResultFile::create([
             'collection_notice_run_id' => $run->id,
             'file_type' => 'detalle_trabajadores',
@@ -224,13 +177,6 @@ final class CrearBaseTrabajadoresActivosStep implements ProcessingStepInterface
                 'year' => $year,
                 'month' => $month,
             ],
-        ]);
-
-        Log::info('✅ Archivo de detalle de trabajadores generado', [
-            'run_id' => $run->id,
-            'file_path' => $relativePath,
-            'records_count' => $processedRows,
-            'size_kb' => round($fileSize / 1024, 2),
         ]);
 
         return $relativePath;

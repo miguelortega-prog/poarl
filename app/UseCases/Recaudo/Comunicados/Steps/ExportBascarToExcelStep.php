@@ -18,8 +18,9 @@ use PhpOffice\PhpSpreadsheet\Writer\Xls;
  *
  * Genera archivos Excel 97 (.xls) con 2 hojas:
  *
- * Hoja 1: Data de BASCAR con campos específicos
- * Hoja 2: Data de detalle_trabajadores (CSV generado en CrearBaseTrabajadoresActivosStep)
+ * Hoja 1 (Empresas): Data de BASCAR con campos específicos
+ * Hoja 2 (Expuestos): Data de detalle_trabajadores con columna TIPO DE ENVIO
+ *                     (CSV generado en CrearBaseTrabajadoresActivosStep + cruce con BASCAR)
  *
  * Límite Excel 97: 65,536 filas por hoja (65,535 datos + 1 encabezado)
  * Si se supera el límite, crea archivos adicionales (_parte2, _parte3, etc.)
@@ -42,49 +43,22 @@ final class ExportBascarToExcelStep implements ProcessingStepInterface
 
     public function execute(CollectionNoticeRun $run): void
     {
-        $startTime = microtime(true);
+        Log::info('Exportando BASCAR a Excel', ['run_id' => $run->id]);
 
-        Log::info('📊 Exportando BASCAR a Excel 97 (.xls)', [
-            'step' => self::class,
-            'run_id' => $run->id,
-            'periodo' => $run->period,
-        ]);
-
-        // Contar registros para determinar si necesitamos múltiples archivos
         $bascarCount = $this->countBascarRecords($run);
         $detalleCount = $this->countDetalleRecords($run);
 
-        Log::info('Conteo de registros para Excel', [
-            'run_id' => $run->id,
-            'bascar_records' => $bascarCount,
-            'detalle_records' => $detalleCount,
-            'max_per_sheet' => self::MAX_ROWS_PER_SHEET,
-        ]);
-
-        // Calcular número de archivos necesarios
         $filesNeeded = max(
             (int) ceil($bascarCount / self::MAX_ROWS_PER_SHEET),
             (int) ceil($detalleCount / self::MAX_ROWS_PER_SHEET),
-            1 // Al menos 1 archivo
+            1
         );
 
-        Log::info('Archivos Excel a generar', [
-            'run_id' => $run->id,
-            'files_needed' => $filesNeeded,
-        ]);
-
-        // Generar archivos
         for ($fileIndex = 1; $fileIndex <= $filesNeeded; $fileIndex++) {
             $this->generateExcelFile($run, $fileIndex, $filesNeeded, $bascarCount, $detalleCount);
         }
 
-        $duration = (int) ((microtime(true) - $startTime) * 1000);
-
-        Log::info('✅ Excel(s) exportado(s) exitosamente', [
-            'run_id' => $run->id,
-            'files_generated' => $filesNeeded,
-            'duration_ms' => $duration,
-        ]);
+        Log::info('Exportación BASCAR a Excel completada', ['run_id' => $run->id]);
     }
 
     /**
@@ -121,38 +95,19 @@ final class ExportBascarToExcelStep implements ProcessingStepInterface
         int $bascarCount,
         int $detalleCount
     ): void {
-        Log::info('Generando archivo Excel', [
-            'run_id' => $run->id,
-            'file_index' => $fileIndex,
-            'total_files' => $totalFiles,
-        ]);
-
-        // Crear spreadsheet
         $spreadsheet = new Spreadsheet();
-
-        // Generar Hoja 1: Data de BASCAR
         $this->generateSheet1($spreadsheet, $run, $fileIndex);
-
-        // Generar Hoja 2: Data de detalle_trabajadores
         $this->generateSheet2($spreadsheet, $run, $fileIndex);
-
-        // Guardar archivo Excel
         $this->saveExcelFile($spreadsheet, $run, $fileIndex, $totalFiles);
     }
 
     /**
-     * Genera Hoja 1 con data de BASCAR.
+     * Genera Hoja 1 (Empresas) con data de BASCAR.
      */
     private function generateSheet1(Spreadsheet $spreadsheet, CollectionNoticeRun $run, int $fileIndex): void
     {
-        Log::info('Generando Hoja 1 (BASCAR)', [
-            'run_id' => $run->id,
-            'file_index' => $fileIndex,
-        ]);
-
-        // Obtener hoja activa (primera hoja)
         $sheet = $spreadsheet->getActiveSheet();
-        $sheet->setTitle('Hoja1');
+        $sheet->setTitle('Empresas');
 
         // Encabezados
         $headers = [
@@ -230,28 +185,18 @@ final class ExportBascarToExcelStep implements ProcessingStepInterface
             ], null, 'A' . $row);
             $row++;
         }
-
-        Log::info('Hoja 1 generada', [
-            'run_id' => $run->id,
-            'file_index' => $fileIndex,
-            'rows' => count($bascarData),
-            'offset' => $offset,
-        ]);
     }
 
     /**
-     * Genera Hoja 2 con data de detalle_trabajadores (CSV).
+     * Genera Hoja 2 (Expuestos) con data de detalle_trabajadores + TIPO DE ENVIO.
+     *
+     * Agrega columna TIPO DE ENVIO al final, cruzando NRO_IDVI (columna 6 del CSV, índice 5)
+     * con num_tomador de data_source_bascar para obtener tipo_de_envio.
      */
     private function generateSheet2(Spreadsheet $spreadsheet, CollectionNoticeRun $run, int $fileIndex): void
     {
-        Log::info('Generando Hoja 2 (detalle_trabajadores)', [
-            'run_id' => $run->id,
-            'file_index' => $fileIndex,
-        ]);
-
-        // Crear nueva hoja
         $sheet = $spreadsheet->createSheet();
-        $sheet->setTitle('Hoja2');
+        $sheet->setTitle('Expuestos');
 
         // Buscar archivo CSV de detalle_trabajadores
         $resultFile = CollectionNoticeRunResultFile::where('collection_notice_run_id', $run->id)
@@ -259,21 +204,16 @@ final class ExportBascarToExcelStep implements ProcessingStepInterface
             ->first();
 
         if (!$resultFile) {
-            Log::warning('Archivo detalle_trabajadores no encontrado para Hoja 2', [
-                'run_id' => $run->id,
-            ]);
             return;
         }
 
         $disk = $this->filesystem->disk($resultFile->disk);
 
         if (!$disk->exists($resultFile->path)) {
-            Log::warning('Archivo detalle_trabajadores no existe en disco', [
-                'run_id' => $run->id,
-                'path' => $resultFile->path,
-            ]);
             return;
         }
+
+        $tipoEnvioMap = $this->loadTipoEnvioMap($run);
 
         // Calcular líneas a saltar y leer
         $skipLines = ($fileIndex - 1) * self::MAX_ROWS_PER_SHEET;
@@ -290,6 +230,8 @@ final class ExportBascarToExcelStep implements ProcessingStepInterface
         while (($data = fgetcsv($csvFile, 0, ';')) !== false) {
             // Escribir header siempre (línea 0)
             if ($currentLine === 0) {
+                // Agregar columna "TIPO DE ENVIO" al final del header
+                $data[] = 'TIPO DE ENVIO';
                 $sheet->fromArray($data, null, 'A' . $excelRow);
                 $excelRow++;
                 $currentLine++;
@@ -301,6 +243,13 @@ final class ExportBascarToExcelStep implements ProcessingStepInterface
                 $currentLine++;
                 continue;
             }
+
+            // Agregar columna TIPO DE ENVIO al final
+            // NRO_IDVI está en el índice 5 del CSV (columna 6)
+            // 0:TPO_IDEN_TRABAJADOR, 1:NRO_IDEN, 2:AÑO, 3:MES, 4:TPO_EMP, 5:NRO_IDVI
+            $nroIdvi = $data[5] ?? '';
+            $tipoEnvio = $tipoEnvioMap[$nroIdvi] ?? '';
+            $data[] = $tipoEnvio;
 
             // Escribir datos
             $sheet->fromArray($data, null, 'A' . $excelRow);
@@ -315,13 +264,30 @@ final class ExportBascarToExcelStep implements ProcessingStepInterface
         }
 
         fclose($csvFile);
+    }
 
-        Log::info('Hoja 2 generada', [
-            'run_id' => $run->id,
-            'file_index' => $fileIndex,
-            'rows' => $writtenRows,
-            'skipped_lines' => $skipLines,
-        ]);
+    /**
+     * Carga mapa de num_tomador → tipo_de_envio de BASCAR.
+     *
+     * @return array<string, string> Key: num_tomador, Value: tipo_de_envio
+     */
+    private function loadTipoEnvioMap(CollectionNoticeRun $run): array
+    {
+        $results = DB::select("
+            SELECT
+                num_tomador,
+                COALESCE(tipo_de_envio, '') as tipo_de_envio
+            FROM data_source_bascar
+            WHERE run_id = ?
+                AND num_tomador IS NOT NULL
+        ", [$run->id]);
+
+        $map = [];
+        foreach ($results as $row) {
+            $map[$row->num_tomador] = $row->tipo_de_envio;
+        }
+
+        return $map;
     }
 
     /**
@@ -400,13 +366,6 @@ final class ExportBascarToExcelStep implements ProcessingStepInterface
                 'total_files' => $totalFiles,
                 'periodo' => $run->period,
             ],
-        ]);
-
-        Log::info('Archivo Excel guardado', [
-            'run_id' => $run->id,
-            'file_index' => $fileIndex,
-            'file_path' => $relativePath,
-            'size_kb' => round($fileSize / 1024, 2),
         ]);
 
         return $relativePath;

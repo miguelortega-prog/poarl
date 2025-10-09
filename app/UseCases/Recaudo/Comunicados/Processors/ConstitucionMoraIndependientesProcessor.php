@@ -7,9 +7,10 @@ namespace App\UseCases\Recaudo\Comunicados\Processors;
 use App\Models\CollectionNoticeRun;
 use App\Services\Recaudo\Comunicados\BaseCollectionNoticeProcessor;
 use App\Services\Recaudo\DataSourceTableManager;
+use App\UseCases\Recaudo\Comunicados\Steps\CleanupDataSourcesStep;
+use App\UseCases\Recaudo\Comunicados\Steps\FilterDettraByTipoCotizanteStep;
+use App\UseCases\Recaudo\Comunicados\Steps\GenerateDettraCompositeKeyStep;
 use App\UseCases\Recaudo\Comunicados\Steps\MarkRunAsCompletedStep;
-use App\UseCases\Recaudo\Comunicados\Steps\SanitizeNumericFieldsStep;
-use App\UseCases\Recaudo\Comunicados\Steps\ValidateDataIntegrityStep;
 use Illuminate\Contracts\Filesystem\Factory as FilesystemFactory;
 
 /**
@@ -17,22 +18,27 @@ use Illuminate\Contracts\Filesystem\Factory as FilesystemFactory;
  *
  * Este comunicado procesa trabajadores independientes con póliza independiente.
  *
+ * Pipeline:
+ * 1. Filtrar DETTRA por tipo_cotizante y riesgo (independientes válidos)
+ * 2. Generar llave compuesta en DETTRA (nit + periodo) con índice
+ * 3. Marcar run como completado
+ * 4. Limpiar datos de data sources
+ *
  * Data sources requeridos:
  * - BASACT: Base de activos (trabajadores independientes)
  * - PAGLOG: Pagos log bancario
  * - PAGPLA: Pagos planilla
- * - DETTRA: Detalle trabajadores
- *
- * TODO: Definir lógica de cruces y transformaciones específicas
+ * - DETTRA: Detalle trabajadores (filtrado + llave compuesta)
  */
 final class ConstitucionMoraIndependientesProcessor extends BaseCollectionNoticeProcessor
 {
     public function __construct(
         DataSourceTableManager $tableManager,
         FilesystemFactory $filesystem,
-        private readonly ValidateDataIntegrityStep $validateDataStep,
-        private readonly SanitizeNumericFieldsStep $sanitizeNumericFieldsStep,
+        private readonly FilterDettraByTipoCotizanteStep $filterDettraByTipoCotizanteStep,
+        private readonly GenerateDettraCompositeKeyStep $generateDettraCompositeKeyStep,
         private readonly MarkRunAsCompletedStep $markRunAsCompletedStep,
+        private readonly CleanupDataSourcesStep $cleanupDataSourcesStep,
     ) {
         parent::__construct($tableManager, $filesystem);
         $this->initializeSteps();
@@ -77,44 +83,38 @@ final class ConstitucionMoraIndependientesProcessor extends BaseCollectionNotice
      * IMPORTANTE: Los datos ya fueron cargados por los jobs previos:
      * - LoadExcelWithCopyJob (x4): convirtió Excel a CSV y cargó BASACT, PAGLOG, PAGPLA, DETTRA
      *
-     * Este procesador SOLO realiza:
-     * - PASO 1: Validar que los datos se cargaron correctamente
-     * - PASO 2: Sanitizar campos numéricos (formato europeo → estándar)
-     * - PASOS 3+: Transformaciones SQL (filtros, cruces, generación de archivos)
+     * Este procesador realiza procesamiento mínimo:
+     * - PASO 1: Filtrar DETTRA por tipo_cotizante y riesgo
+     * - PASO 2: Generar llave compuesta en DETTRA (nit + periodo)
+     * - PASO 3: Marcar run como completado
+     * - PASO 4: Limpiar datos de data sources
      *
      * @return array<int, \App\Contracts\Recaudo\Comunicados\ProcessingStepInterface>
      */
     protected function defineSteps(): array
     {
         return [
-            // === FASE 1: VALIDACIÓN Y SANITIZACIÓN ===
+            // Paso 1: Filtrar DETTRA por tipo_cotizante y riesgo
+            // Mantiene solo registros de trabajadores independientes válidos:
+            // - tipo_cotizante IN ('3', '59') AND riesgo IN ('1', '2', '3')
+            // - O tipo_cotizante = '16' (cualquier riesgo)
+            // Elimina el resto de registros de DETTRA
+            $this->filterDettraByTipoCotizanteStep,
 
-            // Paso 1: Validar integridad de datos en BD
-            // Verifica que los jobs previos cargaron correctamente:
-            // - BASACT, PAGLOG, PAGPLA, DETTRA (LoadExcelWithCopyJob)
-            $this->validateDataStep,
+            // Paso 2: Generar llave compuesta en DETTRA
+            // Crea columna composite_key = nit + periodo del run
+            // Genera índice para búsquedas rápidas en cruces posteriores
+            $this->generateDettraCompositeKeyStep,
 
-            // Paso 2: Sanitizar campos numéricos (formato europeo → estándar)
-            // Limpia campos numéricos que vienen con separadores europeos
-            $this->sanitizeNumericFieldsStep,
-
-            // === FASE 2: TRANSFORMACIONES Y CRUCES (TODO) ===
-
-            // TODO: Paso 3: Filtrar datos por periodo del run
-            // TODO: Paso 4: Generar llaves compuestas en BASACT
-            // TODO: Paso 5: Generar llaves compuestas en PAGLOG
-            // TODO: Paso 6: Cruzar BASACT con PAGLOG y generar archivo de excluidos
-            // TODO: Paso 7: Eliminar de BASACT los registros que cruzaron con PAGLOG
-            // TODO: Paso 8: Agregar datos de contacto (email, dirección, divipola)
-            // TODO: Paso 9: Definir tipo de envío de correspondencia
-            // TODO: Paso 10: Excluir registros sin datos de contacto
-            // TODO: Paso 11: Agregar consecutivo
-            // TODO: Paso 12: Exportar a Excel
-
-            // === FASE 3: FINALIZACIÓN ===
-
-            // Paso N: Marcar run como completado
+            // Paso 3: Marcar run como completado
+            // Cambia el estado del run a 'completed'
+            // Registra la duración total del procesamiento
             $this->markRunAsCompletedStep,
+
+            // Paso 4: Limpiar datos de tablas data_source_
+            // Elimina todos los registros de data_source_* para este run_id
+            // para liberar espacio en disco después del procesamiento exitoso
+            $this->cleanupDataSourcesStep,
         ];
     }
 }

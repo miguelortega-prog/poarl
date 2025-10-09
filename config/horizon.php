@@ -245,7 +245,7 @@ return [
             'maxTime' => 0,
             'maxJobs' => 0,
             'memory' => 2048,
-            'tries' => 1,
+            'tries' => 3, // Aumentado de 1 a 3 para permitir reintentos en caso de fallas transitorias
             'timeout' => 14400,
             'nice' => 0,
         ],

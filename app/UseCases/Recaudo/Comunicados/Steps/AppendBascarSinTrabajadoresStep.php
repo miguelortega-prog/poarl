@@ -50,38 +50,18 @@ final class AppendBascarSinTrabajadoresStep implements ProcessingStepInterface
 
     public function execute(CollectionNoticeRun $run): void
     {
-        $startTime = microtime(true);
+        Log::info('Agregando registros de BASCAR sin trabajadores activos', ['run_id' => $run->id]);
 
-        Log::info('📋 Agregando registros de BASCAR sin trabajadores activos', [
-            'step' => self::class,
-            'run_id' => $run->id,
-        ]);
-
-        // Contar registros sin trabajadores activos
         $totalRecords = $this->countBascarWithoutWorkers($run);
 
         if ($totalRecords === 0) {
-            Log::info('No hay registros de BASCAR sin trabajadores activos', [
-                'run_id' => $run->id,
-            ]);
+            Log::info('Registros sin trabajadores agregados al detalle', ['run_id' => $run->id]);
             return;
         }
 
-        Log::info('Registros de BASCAR sin trabajadores encontrados', [
-            'run_id' => $run->id,
-            'total' => $totalRecords,
-        ]);
-
-        // Agregar registros al archivo existente
         $this->appendToWorkerDetailFile($run, $totalRecords);
 
-        $duration = (int) ((microtime(true) - $startTime) * 1000);
-
-        Log::info('✅ Registros sin trabajadores agregados al detalle', [
-            'run_id' => $run->id,
-            'records_added' => $totalRecords,
-            'duration_ms' => $duration,
-        ]);
+        Log::info('Registros sin trabajadores agregados al detalle', ['run_id' => $run->id]);
     }
 
     /**
@@ -108,39 +88,20 @@ final class AppendBascarSinTrabajadoresStep implements ProcessingStepInterface
 
         $disk = $this->filesystem->disk('collection');
 
-        // Verificar si el archivo existe
         if (!$disk->exists($relativePath)) {
-            Log::warning('Archivo de detalle de trabajadores no existe, se creará nuevo', [
-                'run_id' => $run->id,
-                'file_path' => $relativePath,
-            ]);
-
-            // Crear directorio si no existe
             if (!$disk->exists($relativeDir)) {
                 $disk->makeDirectory($relativeDir);
             }
-
-            // Crear archivo con encabezado
             $disk->put($relativePath, "TPO_IDEN_TRABAJADOR;NRO_IDEN;AÑO;MES;TPO_EMP;NRO_IDVI;CLS_RICT;FCH_INVI;PÓLIZA;VALOR;TPO_COT;FCH_FIN;TRAB_EXPUESTOS\n");
         }
 
         $existingContent = $disk->get($relativePath);
 
-        Log::info('Agregando registros sin trabajadores al archivo', [
-            'run_id' => $run->id,
-            'total_records' => $totalRecords,
-            'file' => $fileName,
-        ]);
-
-        // Extraer año y mes del período (formato YYYYMM)
         $period = $run->period;
         $year = substr($period, 0, 4);
         $month = substr($period, 4, 2);
 
-        // Generar contenido nuevo
         $newContent = '';
-
-        // Procesar en chunks
         $chunkSize = 5000;
         $offset = 0;
         $processedRows = 0;
@@ -161,8 +122,6 @@ final class AppendBascarSinTrabajadoresStep implements ProcessingStepInterface
             ", [$run->id, $chunkSize, $offset]);
 
             foreach ($rows as $row) {
-                // TODO: NUM_POLIZA puede estar quedando en notación científica en el job de almacenamiento
-                // Esto debe corregirse en LoadCsvDataSourcesJob o LoadExcelWithCopyJob si es necesario
                 $poliza = $row->num_poliza ?? '';
 
                 $newContent .= sprintf(
@@ -172,7 +131,7 @@ final class AppendBascarSinTrabajadoresStep implements ProcessingStepInterface
                     $year,                           // AÑO
                     $month,                          // MES
                     $row->ident_asegurado ?? '',    // TPO_EMP
-                    self::NRO_IDVI_DEFAULT,         // NRO_IDVI (pendiente definir)
+                    $row->num_tomador ?? '',        // NRO_IDVI mismo del tomador
                     self::CLS_RICT,                 // CLS_RICT (número romano 1)
                     self::FCH_INVI,                 // FCH_INVI (valor fijo)
                     $poliza,                         // PÓLIZA
@@ -187,18 +146,15 @@ final class AppendBascarSinTrabajadoresStep implements ProcessingStepInterface
             $offset += $chunkSize;
         }
 
-        // Guardar archivo (append)
         $finalContent = $existingContent . $newContent;
         $disk->put($relativePath, $finalContent);
         $fileSize = $disk->size($relativePath);
 
-        // Actualizar registro en base de datos
         $existingFile = CollectionNoticeRunResultFile::where('collection_notice_run_id', $run->id)
             ->where('file_type', 'detalle_trabajadores')
             ->first();
 
         if ($existingFile) {
-            // Actualizar registro existente
             $existingFile->update([
                 'size' => $fileSize,
                 'records_count' => ($existingFile->records_count ?? 0) + $processedRows,
@@ -207,16 +163,7 @@ final class AppendBascarSinTrabajadoresStep implements ProcessingStepInterface
                     'bascar_sin_trabajadores_added' => $processedRows,
                 ]),
             ]);
-
-            Log::info('✅ Archivo de detalle actualizado', [
-                'run_id' => $run->id,
-                'file_path' => $relativePath,
-                'new_records' => $processedRows,
-                'total_records' => $existingFile->records_count,
-                'size_kb' => round($fileSize / 1024, 2),
-            ]);
         } else {
-            // Crear nuevo registro
             CollectionNoticeRunResultFile::create([
                 'collection_notice_run_id' => $run->id,
                 'file_type' => 'detalle_trabajadores',
@@ -230,13 +177,6 @@ final class AppendBascarSinTrabajadoresStep implements ProcessingStepInterface
                     'step' => 'append_bascar_sin_trabajadores',
                     'period' => $run->period,
                 ],
-            ]);
-
-            Log::info('✅ Archivo de detalle creado', [
-                'run_id' => $run->id,
-                'file_path' => $relativePath,
-                'records_count' => $processedRows,
-                'size_kb' => round($fileSize / 1024, 2),
             ]);
         }
     }

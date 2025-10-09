@@ -12,8 +12,9 @@ use App\UseCases\Recaudo\Comunicados\Steps\AddDivipolaToBascarStep;
 use App\UseCases\Recaudo\Comunicados\Steps\AddEmailToBascarStep;
 use App\UseCases\Recaudo\Comunicados\Steps\AddSequenceStep;
 use App\UseCases\Recaudo\Comunicados\Steps\AppendBascarSinTrabajadoresStep;
-// use App\UseCases\Recaudo\Comunicados\Steps\CleanupDataSourcesStep;
+use App\UseCases\Recaudo\Comunicados\Steps\CleanupDataSourcesStep;
 use App\UseCases\Recaudo\Comunicados\Steps\CountDettraWorkersAndUpdateBascarStep;
+use App\UseCases\Recaudo\Comunicados\Steps\CreateBascarIndexesStep;
 use App\UseCases\Recaudo\Comunicados\Steps\CrearBaseTrabajadoresActivosStep;
 use App\UseCases\Recaudo\Comunicados\Steps\CrossBascarWithPagaplStep;
 use App\UseCases\Recaudo\Comunicados\Steps\DefineTipoDeEnvioStep;
@@ -61,6 +62,7 @@ final class ConstitucionMoraAportantesProcessor extends BaseCollectionNoticeProc
         private readonly SanitizeNumericFieldsStep $sanitizeNumericFieldsStep,
         private readonly SanitizeDateFieldsStep $sanitizeDateFieldsStep,
         private readonly SanitizeCiuTomStep $sanitizeCiuTomStep,
+        private readonly CreateBascarIndexesStep $createBascarIndexesStep,
         private readonly FilterDataByPeriodStep $filterDataByPeriodStep,
         private readonly GenerateBascarCompositeKeyStep $generateBascarKeysStep,
         private readonly GeneratePagaplCompositeKeyStep $generatePagaplKeysStep,
@@ -79,7 +81,7 @@ final class ConstitucionMoraAportantesProcessor extends BaseCollectionNoticeProc
         private readonly AddSequenceStep $addSequenceStep,
         private readonly ExportBascarToExcelStep $exportBascarToExcelStep,
         private readonly MarkRunAsCompletedStep $markRunAsCompletedStep,
-        // private readonly CleanupDataSourcesStep $cleanupDataSourcesStep,
+        private readonly CleanupDataSourcesStep $cleanupDataSourcesStep,
     ) {
         parent::__construct($tableManager, $filesystem);
         $this->initializeSteps();
@@ -167,99 +169,110 @@ final class ConstitucionMoraAportantesProcessor extends BaseCollectionNoticeProc
             // - Si encuentra 0 o múltiples coincidencias → NO actualiza (ambiguo)
             $this->sanitizeCiuTomStep,
 
-            // === FASE 2: FILTRADO DE DATOS POR PERIODO ===
+            // === FASE 2: OPTIMIZACIÓN DE ÍNDICES ===
 
-            // Paso 5: Filtrar datos por periodo del run
+            // Paso 5: Crear índices en data_source_bascar (idempotente)
+            // Crea índices para optimizar operaciones posteriores:
+            // - idx_bascar_tipo_envio: Para loadTipoEnvioMap() en ExportBascarToExcelStep
+            // - idx_bascar_num_tomador: Para búsquedas por NIT
+            // - idx_bascar_run_id: Para filtros por run_id
+            // - idx_bascar_run_num_tomador: Para loadTipoEnvioMap() con filtro run_id
+            $this->createBascarIndexesStep,
+
+            // === FASE 3: FILTRADO DE DATOS POR PERIODO ===
+
+            // Paso 6: Filtrar datos por periodo del run
             // - Si periodo = "Todos Los Periodos": No filtra nada
             // - Si periodo = YYYYMM: Filtra DETTRA por FECHA_INICIO_VIG
             $this->filterDataByPeriodStep,
 
-            // === FASE 3: TRANSFORMACIÓN Y CRUCE DE DATOS SQL ===
+            // === FASE 4: TRANSFORMACIÓN Y CRUCE DE DATOS SQL ===
 
-            // Paso 6: Generar llaves compuestas en BASCAR (SQL UPDATE)
+            // Paso 7: Generar llaves compuestas en BASCAR (SQL UPDATE)
             $this->generateBascarKeysStep,
 
-            // Paso 7: Generar llaves compuestas en PAGAPL (SQL UPDATE)
+            // Paso 8: Generar llaves compuestas en PAGAPL (SQL UPDATE)
             $this->generatePagaplKeysStep,
 
-            // Paso 8: Cruzar BASCAR con PAGAPL y generar archivo de excluidos (SQL + tabla temporal)
+            // Paso 9: Cruzar BASCAR con PAGAPL y generar archivo de excluidos (SQL + tabla temporal)
             $this->crossBascarPagaplStep,
 
-            // Paso 9: Eliminar de BASCAR los registros que cruzaron con PAGAPL (SQL DELETE)
+            // Paso 10: Eliminar de BASCAR los registros que cruzaron con PAGAPL (SQL DELETE)
             $this->removeCrossedBascarStep,
 
-            // Paso 10: Identificar PSI (Póliza de Seguro Independiente)
+            // Paso 11: Identificar PSI (Póliza de Seguro Independiente)
             // Cruza BASCAR.NUM_TOMADOR con BAPRPO.tomador para obtener pol_independiente
             $this->identifyPsiStep,
 
-            // Paso 11: Excluir PSI Persona Jurídica (9 dígitos)
+            // Paso 12: Excluir PSI Persona Jurídica (9 dígitos)
             // Excluye registros con PSI='S' y NUM_TOMADOR de 9 dígitos
             // Los agrega al archivo de excluidos y los elimina de BASCAR
             $this->excludePsiPersonaJuridicaStep,
 
-            // Paso 12: Contar trabajadores de DETTRA y actualizar BASCAR (SQL UPDATE)
+            // Paso 13: Contar trabajadores de DETTRA y actualizar BASCAR (SQL UPDATE)
             $this->countDettraWorkersStep,
 
-            // Paso 13: Crear base de trabajadores activos (CSV detalle)
+            // Paso 14: Crear base de trabajadores activos (CSV detalle)
             // Cruza DETTRA.NRO_DOCUMTO con BASCAR.NUM_TOMADOR
             // Genera archivo detalle_trabajadores{run_id}.csv
             $this->crearBaseTrabajadoresActivosStep,
 
-            // Paso 14: Agregar BASCAR sin trabajadores al detalle
+            // Paso 15: Agregar BASCAR sin trabajadores al detalle
             // Filtra BASCAR con observacion_trabajadores = 'Sin trabajadores activos'
             // Los agrega al archivo detalle_trabajadores{run_id}.csv con valores por defecto
             $this->appendBascarSinTrabajadoresStep,
 
-            // Paso 15: Agregar código de ciudad y departamento a BASCAR
+            // Paso 16: Agregar código de ciudad y departamento a BASCAR
             // Cruza BASCAR.NUM_TOMADOR con DATPOL.NRO_DOCUMTO
             // Concatena DATPOL.cod_dpto + DATPOL.cod_ciudad → BASCAR.city_code
             // Copia DATPOL.cod_dpto → BASCAR.departamento
             $this->addCityCodeToBascarStep,
 
-            // Paso 16: Agregar email a BASCAR desde PAGPLA
+            // Paso 17: Agregar email a BASCAR desde PAGPLA
             // Cruza BASCAR.NUM_TOMADOR con PAGPLA.identificacion_aportante
             // Obtiene PAGPLA.email y valida formato, establece NULL para emails inválidos
             $this->addEmailToBascarStep,
 
-            // Paso 17: Agregar DIVIPOLA y dirección a BASCAR desde PAGPLA
+            // Paso 18: Agregar DIVIPOLA y dirección a BASCAR desde PAGPLA
             // Cruza BASCAR.NUM_TOMADOR con PAGPLA.identificacion_aportante
             // Concatena codigo_departamento (LPAD 2) + codigo_ciudad (LPAD 3) → divipola
             // Obtiene direccion desde PAGPLA
             $this->addDivipolaToBascarStep,
 
-            // Paso 18: Definir tipo de envío de correspondencia
+            // Paso 19: Definir tipo de envío de correspondencia
             // Si tiene email → tipo_de_envio = "Correo"
             // Si NO tiene email PERO tiene direccion → tipo_de_envio = "Fisico"
             // Si no tiene ninguno → tipo_de_envio = NULL
             $this->defineTipoDeEnvioStep,
 
-            // Paso 19: Excluir registros sin datos de contacto
+            // Paso 20: Excluir registros sin datos de contacto
             // Filtra registros con tipo_de_envio IS NULL
             // Los agrega al archivo de excluidos con motivo "Sin datos de contacto"
             // Elimina estos registros de BASCAR
             $this->excludeSinDatosContactoStep,
 
-            // Paso 20: Agregar consecutivo a BASCAR
+            // Paso 21: Agregar consecutivo a BASCAR
             // Genera consecutivo con formato: CON-{IDENT_ASEGURADO}-{NUM_TOMADOR}-{YYYYMMDD}-{SECUENCIA}
             // SECUENCIA: número secuencial de 5 dígitos (00001, 00002, ...)
             $this->addSequenceStep,
 
-            // Paso 21: Exportar BASCAR a Excel 97 (.xls)
+            // Paso 22: Exportar BASCAR a Excel 97 (.xls)
             // Genera archivo(s) Excel con 2 hojas:
-            // - Hoja 1: Data de BASCAR (16 columnas)
-            // - Hoja 2: Data de detalle_trabajadores (CSV)
+            // - Hoja 1 (Empresas): Data de BASCAR (16 columnas)
+            // - Hoja 2 (Expuestos): Data de detalle_trabajadores + TIPO DE ENVIO
             // Si supera 65,535 filas, crea archivos adicionales (_parte2, _parte3, etc.)
+            // Optimizado con índices creados en Paso 5
             $this->exportBascarToExcelStep,
 
-            // Paso 22: Marcar run como completado
+            // Paso 23: Marcar run como completado
             // Cambia el estado del run a 'completed'
             // Registra la duración total del procesamiento
             $this->markRunAsCompletedStep,
 
-            // TODO: Paso 23 (COMENTADO): Limpiar datos de tablas data_source_
-            // Descomentar cuando sea pertinente eliminar los datos después del procesamiento
-            // Elimina todos los registros de data_source_* para liberar espacio
-            // $this->cleanupDataSourcesStep,
+            // Paso 24: Limpiar datos de tablas data_source_
+            // Elimina todos los registros de data_source_* para este run_id
+            // para liberar espacio en disco después del procesamiento exitoso
+            $this->cleanupDataSourcesStep,
         ];
     }
 }

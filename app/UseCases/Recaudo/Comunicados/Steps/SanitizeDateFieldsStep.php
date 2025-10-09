@@ -48,30 +48,13 @@ final class SanitizeDateFieldsStep implements ProcessingStepInterface
 
     public function execute(CollectionNoticeRun $run): void
     {
-        $startTime = microtime(true);
-
-        Log::info('📅 Sanitizando campos de fecha en data sources', [
-            'step' => self::class,
-            'run_id' => $run->id,
-        ]);
-
-        $totalFieldsSanitized = 0;
-        $totalRecordsProcessed = 0;
+        Log::info('Sanitizando campos de fecha', ['run_id' => $run->id]);
 
         foreach (self::DATE_FIELDS as $tableName => $columns) {
-            $result = $this->sanitizeTableDateFields($tableName, $columns, $run);
-            $totalFieldsSanitized += $result['fields'];
-            $totalRecordsProcessed += $result['records'];
+            $this->sanitizeTableDateFields($tableName, $columns, $run);
         }
 
-        $duration = (int) ((microtime(true) - $startTime) * 1000);
-
-        Log::info('✅ Sanitización de campos de fecha completada', [
-            'run_id' => $run->id,
-            'total_fields_sanitized' => $totalFieldsSanitized,
-            'total_records_processed' => $totalRecordsProcessed,
-            'duration_ms' => $duration,
-        ]);
+        Log::info('Sanitización de campos de fecha completada', ['run_id' => $run->id]);
     }
 
     /**
@@ -80,27 +63,13 @@ final class SanitizeDateFieldsStep implements ProcessingStepInterface
      * @param string $tableName Nombre de la tabla
      * @param array<string> $columns Lista de columnas a sanitizar
      * @param CollectionNoticeRun $run Run actual
-     * @return array{fields: int, records: int}
      */
-    private function sanitizeTableDateFields(string $tableName, array $columns, CollectionNoticeRun $run): array
+    private function sanitizeTableDateFields(string $tableName, array $columns, CollectionNoticeRun $run): void
     {
-        Log::info('Sanitizando campos de fecha en tabla', [
-            'table' => $tableName,
-            'columns' => $columns,
-            'run_id' => $run->id,
-        ]);
-
-        // Contar registros en la tabla antes de sanitizar
-        $recordCount = DB::table($tableName)
-            ->where('run_id', $run->id)
-            ->count();
+        $recordCount = DB::table($tableName)->where('run_id', $run->id)->count();
 
         if ($recordCount === 0) {
-            Log::warning('Tabla sin registros, skipping sanitización de fechas', [
-                'table' => $tableName,
-                'run_id' => $run->id,
-            ]);
-            return ['fields' => 0, 'records' => 0];
+            return;
         }
 
         // Construir SET clause dinámicamente para todas las columnas
@@ -111,21 +80,11 @@ final class SanitizeDateFieldsStep implements ProcessingStepInterface
         $setClause = implode(', ', $setClauses);
 
         // Ejecutar UPDATE masivo
-        $updated = DB::update("
+        DB::update("
             UPDATE {$tableName}
             SET {$setClause}
             WHERE run_id = ?
         ", [$run->id]);
-
-        Log::info('✅ Campos de fecha sanitizados en tabla', [
-            'table' => $tableName,
-            'run_id' => $run->id,
-            'records_in_table' => number_format($recordCount),
-            'records_updated' => number_format($updated),
-            'columns_sanitized' => $columns,
-        ]);
-
-        return ['fields' => count($columns), 'records' => $updated];
     }
 
     /**
@@ -146,13 +105,13 @@ final class SanitizeDateFieldsStep implements ProcessingStepInterface
             -- Si ya está en formato YYYY-MM-DD (patrón: 4 dígitos-2 dígitos-2 dígitos)
             WHEN {$column} ~ '^\d{4}-\d{2}-\d{2}$' THEN {$column}
 
+            -- Si es DD-MM-YYYY (patrón: 2 dígitos-2 dígitos-4 dígitos) - FORMATO PRINCIPAL
+            WHEN {$column} ~ '^\d{2}-\d{2}-\d{4}$' THEN
+                TO_CHAR(TO_DATE({$column}, 'DD-MM-YYYY'), 'YYYY-MM-DD')
+
             -- Si es DD/MM/YYYY (patrón: 2 dígitos/2 dígitos/4 dígitos)
             WHEN {$column} ~ '^\d{2}/\d{2}/\d{4}$' THEN
                 TO_CHAR(TO_DATE({$column}, 'DD/MM/YYYY'), 'YYYY-MM-DD')
-
-            -- Si es DD-MM-YYYY (patrón: 2 dígitos-2 dígitos-4 dígitos)
-            WHEN {$column} ~ '^\d{2}-\d{2}-\d{4}$' THEN
-                TO_CHAR(TO_DATE({$column}, 'DD-MM-YYYY'), 'YYYY-MM-DD')
 
             -- Si es D/M/YYYY o DD/M/YYYY (día y mes sin padding)
             WHEN {$column} ~ '^\d{1,2}/\d{1,2}/\d{4}$' THEN
