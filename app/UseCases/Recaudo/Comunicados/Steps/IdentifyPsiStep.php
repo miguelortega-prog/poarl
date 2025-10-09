@@ -110,7 +110,7 @@ final class IdentifyPsiStep implements ProcessingStepInterface
 
             DB::statement("
                 CREATE INDEX IF NOT EXISTS idx_data_source_bascar_num_tomador
-                ON data_source_bascar(NUM_TOMADOR)
+                ON data_source_bascar(num_tomador)
             ");
 
             Log::info('✅ Índice creado en BASCAR.NUM_TOMADOR');
@@ -148,11 +148,11 @@ final class IdentifyPsiStep implements ProcessingStepInterface
             UPDATE data_source_bascar b
             SET psi = TRIM(baprpo.pol_independiente)
             FROM data_source_baprpo baprpo
-            WHERE b.NUM_TOMADOR = baprpo.tomador
+            WHERE b.num_tomador = baprpo.tomador
                 AND b.run_id = ?
                 AND baprpo.run_id = ?
-                AND b.NUM_TOMADOR IS NOT NULL
-                AND b.NUM_TOMADOR != ''
+                AND b.num_tomador IS NOT NULL
+                AND b.num_tomador != ''
                 AND baprpo.tomador IS NOT NULL
                 AND baprpo.tomador != ''
         ", [$run->id, $run->id]);

@@ -106,9 +106,9 @@ final class AddSequenceStep implements ProcessingStepInterface
                     CONCAT(
                         'CON',
                         '-',
-                        COALESCE(IDENT_ASEGURADO, ''),
+                        COALESCE(ident_asegurado, ''),
                         '-',
-                        COALESCE(NUM_TOMADOR, ''),
+                        COALESCE(num_tomador, ''),
                         '-',
                         TO_CHAR(NOW(), 'YYYYMMDD'),
                         '-',

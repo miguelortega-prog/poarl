@@ -58,6 +58,8 @@ class LoadExcelWithCopyJob implements ShouldQueue
         'PAGPLA' => 'data_source_pagpla',
         'DATPOL' => 'data_source_datpol',
         'DETTRA' => 'data_source_dettra',
+        'BASACT' => 'data_source_basact',
+        'PAGLOG' => 'data_source_paglog',
     ];
 
     public function __construct(

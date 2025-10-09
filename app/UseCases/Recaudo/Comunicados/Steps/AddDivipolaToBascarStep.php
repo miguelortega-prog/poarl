@@ -131,31 +131,31 @@ final class AddDivipolaToBascarStep implements ProcessingStepInterface
         $updated = DB::update("
             UPDATE data_source_bascar
             SET
-                direccion = TRIM(DIR_TOM),
+                direccion = TRIM(dir_tom),
                 divipola = CONCAT(
-                    LPAD(SUBSTRING(CIU_TOM, 1, 2), 2, '0'),
-                    LPAD(SUBSTRING(CIU_TOM, 3), 3, '0')
+                    LPAD(SUBSTRING(ciu_tom, 1, 2), 2, '0'),
+                    LPAD(SUBSTRING(ciu_tom, 3), 3, '0')
                 )
             WHERE run_id = ?
-                -- Validar DIR_TOM (dirección)
-                AND DIR_TOM IS NOT NULL
-                AND DIR_TOM != ''
+                -- Validar dir_tom (dirección)
+                AND dir_tom IS NOT NULL
+                AND dir_tom != ''
                 -- Validar que contenga tipo de vía común en Colombia (case-insensitive)
-                AND DIR_TOM ~* '(calle|carrera|diagonal|avenida|transversal|autopista|circular|variante|cl|cr|cra|dg|av|tv|circ|var|krr)'
+                AND dir_tom ~* '(calle|carrera|diagonal|avenida|transversal|autopista|circular|variante|cl|cr|cra|dg|av|tv|circ|var|krr)'
                 -- Validar que contenga números (característica esencial de dirección)
-                AND DIR_TOM ~ '[0-9]'
+                AND dir_tom ~ '[0-9]'
                 -- Excluir direcciones específicas prohibidas
-                AND UPPER(TRIM(DIR_TOM)) != 'AV CALLE 26 # 68B 31 TSB'
-                AND UPPER(DIR_TOM) NOT LIKE '%NO DEFINIDA%'
+                AND UPPER(TRIM(dir_tom)) != 'AV CALLE 26 # 68B 31 TSB'
+                AND UPPER(dir_tom) NOT LIKE '%NO DEFINIDA%'
                 -- Validar que tenga al menos longitud mínima razonable (ej: 'CL 1 # 2-3')
-                AND LENGTH(DIR_TOM) >= 7
-                -- Validar CIU_TOM (código ciudad)
-                AND CIU_TOM IS NOT NULL
-                AND CIU_TOM != ''
-                -- Validar que CIU_TOM tenga al menos 3 caracteres (mínimo para dpto + ciudad)
-                AND LENGTH(CIU_TOM) >= 3
-                -- Validar que CIU_TOM contenga solo dígitos
-                AND CIU_TOM ~ '^[0-9]+$'
+                AND LENGTH(dir_tom) >= 7
+                -- Validar ciu_tom (código ciudad)
+                AND ciu_tom IS NOT NULL
+                AND ciu_tom != ''
+                -- Validar que ciu_tom tenga al menos 3 caracteres (mínimo para dpto + ciudad)
+                AND LENGTH(ciu_tom) >= 3
+                -- Validar que ciu_tom contenga solo dígitos
+                AND ciu_tom ~ '^[0-9]+$'
         ", [$run->id]);
 
         Log::info('Dirección y DIVIPOLA válidos copiados desde DIR_TOM y CIU_TOM', [
@@ -180,7 +180,7 @@ final class AddDivipolaToBascarStep implements ProcessingStepInterface
             'run_id' => $run->id,
         ]);
 
-        // Usar subconsulta para obtener la primera dirección válida por cada NUM_TOMADOR
+        // Usar subconsulta para obtener la primera dirección válida por cada num_tomador
         $updated = DB::update("
             UPDATE data_source_bascar AS b
             SET
@@ -191,7 +191,7 @@ final class AddDivipolaToBascarStep implements ProcessingStepInterface
                     )
                     FROM data_source_pagpla AS p
                     WHERE p.run_id = ?
-                        AND p.identificacion_aportante = b.NUM_TOMADOR
+                        AND p.identificacion_aportante = b.num_tomador
                         AND p.direccion IS NOT NULL
                         AND p.direccion != ''
                         -- Validar que contenga tipo de vía común en Colombia (case-insensitive)
@@ -210,7 +210,7 @@ final class AddDivipolaToBascarStep implements ProcessingStepInterface
                     SELECT TRIM(p.direccion)
                     FROM data_source_pagpla AS p
                     WHERE p.run_id = ?
-                        AND p.identificacion_aportante = b.NUM_TOMADOR
+                        AND p.identificacion_aportante = b.num_tomador
                         AND p.direccion IS NOT NULL
                         AND p.direccion != ''
                         AND p.direccion ~* '(calle|carrera|diagonal|avenida|transversal|autopista|circular|variante|cl|cr|cra|dg|av|tv|circ|var|krr)'
@@ -222,8 +222,8 @@ final class AddDivipolaToBascarStep implements ProcessingStepInterface
                     LIMIT 1
                 )
             WHERE b.run_id = ?
-                AND b.NUM_TOMADOR IS NOT NULL
-                AND b.NUM_TOMADOR != ''
+                AND b.num_tomador IS NOT NULL
+                AND b.num_tomador != ''
                 -- NUEVO: Solo actualizar registros que quedaron sin direccion o divipola
                 AND (
                     (b.direccion IS NULL OR b.direccion = '')

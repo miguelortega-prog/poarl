@@ -120,8 +120,9 @@
                         </div>
                     </form>
 
-                    <div class="grid grid-cols-7 gap-4 rounded-2xl bg-gray-100 px-6 py-3 text-label font-semibold uppercase tracking-wide text-gray-700 dark:bg-gray-900/60 dark:text-gray-200">
+                    <div class="grid grid-cols-8 gap-4 rounded-2xl bg-gray-100 px-6 py-3 text-label font-semibold uppercase tracking-wide text-gray-700 dark:bg-gray-900/60 dark:text-gray-200">
                         <span>{{ __('Id Comunicado') }}</span>
+                        <span>{{ __('Tipo De Comunicado') }}</span>
                         <span>{{ __('Periodo') }}</span>
                         <span>{{ __('Fecha Programación') }}</span>
                         <span>{{ __('Usuario Programación') }}</span>
@@ -140,7 +141,7 @@
                             ], true);
                         @endphp
                         <div x-data="{ openRunDetails: false, openResultFiles: false, openErrors: false }">
-                        <div class="grid grid-cols-7 items-center gap-4 rounded-2xl border border-gray-200 px-6 py-4 text-body text-gray-700 transition dark:border-gray-700 dark:text-gray-200">
+                        <div class="grid grid-cols-8 items-center gap-4 rounded-2xl border border-gray-200 px-6 py-4 text-body text-gray-700 transition dark:border-gray-700 dark:text-gray-200">
                             <button
                                 type="button"
                                 @click="openRunDetails = true"
@@ -148,6 +149,9 @@
                             >
                                 {{ $run->id }}
                             </button>
+                            <span class="text-sm">
+                                {{ $run->type?->name ?? __('N/D') }}
+                            </span>
                             <span class="text-sm">
                                 {{ $run->period === '*' ? __('Todos') : ($run->period ?? __('N/D')) }}
                             </span>

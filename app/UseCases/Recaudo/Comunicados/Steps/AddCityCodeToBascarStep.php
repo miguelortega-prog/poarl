@@ -197,13 +197,13 @@ final class AddCityCodeToBascarStep implements ProcessingStepInterface
                 city_code = CONCAT(COALESCE(d.cod_dpto, ''), COALESCE(d.cod_ciudad, '')),
                 departamento = d.cod_dpto
             FROM data_source_datpol d
-            WHERE b.NUM_TOMADOR = d.NRO_DOCUMTO
+            WHERE b.num_tomador = d.nro_documto
                 AND b.run_id = ?
                 AND d.run_id = ?
-                AND b.NUM_TOMADOR IS NOT NULL
-                AND b.NUM_TOMADOR != ''
-                AND d.NRO_DOCUMTO IS NOT NULL
-                AND d.NRO_DOCUMTO != ''
+                AND b.num_tomador IS NOT NULL
+                AND b.num_tomador != ''
+                AND d.nro_documto IS NOT NULL
+                AND d.nro_documto != ''
                 AND (d.cod_dpto IS NOT NULL OR d.cod_ciudad IS NOT NULL)
         ", [$run->id, $run->id]);
 

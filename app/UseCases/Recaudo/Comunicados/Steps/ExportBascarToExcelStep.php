@@ -184,21 +184,21 @@ final class ExportBascarToExcelStep implements ProcessingStepInterface
         // Obtener data de BASCAR
         $bascarData = DB::select("
             SELECT
-                b.NUM_TOMADOR as nit,
-                CONCAT('COPASST ', COALESCE(b.NOM_TOMADOR, '')) as representante_legal,
+                b.num_tomador as nit,
+                CONCAT('COPASST ', COALESCE(b.nom_tomador, '')) as representante_legal,
                 b.email as correo,
                 COALESCE(r.official_id, '') as cedula,
-                CONCAT('COPASST ', COALESCE(b.NOM_TOMADOR, '')) as nombre_empresa,
+                CONCAT('COPASST ', COALESCE(b.nom_tomador, '')) as nombre_empresa,
                 'COPASST' as cargo,
                 b.direccion,
                 b.ciu_tom as ciudad,
-                b.NUM_POLIZA as contrato,
+                b.num_poliza as contrato,
                 SUBSTRING(b.periodo FROM 1 FOR 4) as anio1,
                 SUBSTRING(b.periodo FROM 5 FOR 2) as mes1,
-                b.VALOR_TOTAL_FACT as valor1,
+                b.valor_total_fact as valor1,
                 b.cantidad_trabajadores as afiliados1,
                 b.consecutivo,
-                b.IDENT_ASEGURADO as tip_ind,
+                b.ident_asegurado as tip_ind,
                 b.divipola as cod_ciudad
             FROM data_source_bascar b
             INNER JOIN collection_notice_runs r ON b.run_id = r.id

@@ -15,16 +15,21 @@ use Illuminate\Support\Facades\Log;
  * Step: Crear Base de Trabajadores Activos.
  *
  * Realiza un cruce inverso entre DETTRA y BASCAR:
- * - Busca registros de DETTRA cuyo NRO_DOCUMTO exista en BASCAR.NUM_TOMADOR
+ * - Busca registros de DETTRA cuyo nro_documto exista en BASCAR.num_tomador
  * - Genera archivo CSV "Detalle de Trabajadores" con información detallada
  *
  * Cruce:
- * DETTRA.NRO_DOCUMTO = BASCAR.NUM_TOMADOR
+ * DETTRA.nro_documto = BASCAR.num_tomador
  *
  * Output: detalle_trabajadores{run_id}.csv
  */
 final class CrearBaseTrabajadoresActivosStep implements ProcessingStepInterface
 {
+    /**
+     * Constante para valor fijo FCH_FIN.
+     */
+    private const FCH_FIN = 'NO REGISTRA';
+
     public function __construct(
         private readonly FilesystemFactory $filesystem
     ) {
@@ -82,11 +87,11 @@ final class CrearBaseTrabajadoresActivosStep implements ProcessingStepInterface
             SELECT COUNT(*) as count
             FROM data_source_dettra d
             INNER JOIN data_source_bascar b
-                ON d.NRO_DOCUMTO = b.NUM_TOMADOR
+                ON d.nro_documto = b.num_tomador
             WHERE d.run_id = ?
                 AND b.run_id = ?
-                AND d.NRO_DOCUMTO IS NOT NULL
-                AND b.NUM_TOMADOR IS NOT NULL
+                AND d.nro_documto IS NOT NULL
+                AND b.num_tomador IS NOT NULL
         ", [$run->id, $run->id])->count;
     }
 
@@ -128,25 +133,25 @@ final class CrearBaseTrabajadoresActivosStep implements ProcessingStepInterface
         while ($offset < $totalRecords) {
             $rows = DB::select("
                 SELECT
-                    d.TIPO_DOC as tpo_iden_trabajador,
-                    d.NIT as nro_iden,
+                    d.tipo_doc as tpo_iden_trabajador,
+                    d.nit as nro_iden,
                     ? as anio,
                     ? as mes,
-                    b.IDENT_ASEGURADO as tpo_emp,
-                    d.NRO_DOCUMTO as nro_idvi,
-                    d.RIESGO as cls_rict,
-                    d.FECHA_INI_COBERT as fch_invi,
-                    b.NUM_POLIZA as poliza,
-                    b.VALOR_TOTAL_FACT as valor_total_fact,
+                    b.ident_asegurado as tpo_emp,
+                    d.nro_documto as nro_idvi,
+                    d.riesgo as cls_rict,
+                    d.fecha_ini_cobert as fch_invi,
+                    b.num_poliza as poliza,
+                    b.valor_total_fact,
                     b.cantidad_trabajadores,
-                    d.TIPO_COTIZANTE as tpo_cot
+                    d.tipo_cotizante as tpo_cot
                 FROM data_source_dettra d
                 INNER JOIN data_source_bascar b
-                    ON d.NRO_DOCUMTO = b.NUM_TOMADOR
+                    ON d.nro_documto = b.num_tomador
                 WHERE d.run_id = ?
                     AND b.run_id = ?
-                    AND d.NRO_DOCUMTO IS NOT NULL
-                    AND b.NUM_TOMADOR IS NOT NULL
+                    AND d.nro_documto IS NOT NULL
+                    AND b.num_tomador IS NOT NULL
                 ORDER BY d.id
                 LIMIT ?
                 OFFSET ?
@@ -181,7 +186,7 @@ final class CrearBaseTrabajadoresActivosStep implements ProcessingStepInterface
                     $row->poliza ?? '',
                     $valor,
                     $row->tpo_cot ?? '',
-                    'NO REGISTRA',
+                    self::FCH_FIN,
                     $row->cantidad_trabajadores ?? 0
                 );
                 $processedRows++;
@@ -242,7 +247,7 @@ final class CrearBaseTrabajadoresActivosStep implements ProcessingStepInterface
             3 => 'III',
             4 => 'IV',
             5 => 'V',
-            default => (string) $number, // Fallback por si hay valores fuera de rango
+            default => 'I', // Fallback por si hay valores fuera de rango
         };
     }
 

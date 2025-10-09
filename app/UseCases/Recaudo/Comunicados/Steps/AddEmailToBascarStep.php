@@ -141,14 +141,14 @@ final class AddEmailToBascarStep implements ProcessingStepInterface
             'run_id' => $run->id,
         ]);
 
-        // Usar subconsulta para obtener el primer email válido por cada NUM_TOMADOR
+        // Usar subconsulta para obtener el primer email válido por cada num_tomador
         $updated = DB::update("
             UPDATE data_source_bascar AS b
             SET email = (
                 SELECT TRIM(p.email)
                 FROM data_source_pagpla AS p
                 WHERE p.run_id = ?
-                    AND p.identificacion_aportante = b.NUM_TOMADOR
+                    AND p.identificacion_aportante = b.num_tomador
                     AND p.email IS NOT NULL
                     AND p.email != ''
                     -- Validar formato de email
@@ -160,8 +160,8 @@ final class AddEmailToBascarStep implements ProcessingStepInterface
                 LIMIT 1
             )
             WHERE b.run_id = ?
-                AND b.NUM_TOMADOR IS NOT NULL
-                AND b.NUM_TOMADOR != ''
+                AND b.num_tomador IS NOT NULL
+                AND b.num_tomador != ''
                 -- NUEVO: Solo actualizar registros que quedaron sin email
                 AND (b.email IS NULL OR b.email = '')
         ", [$run->id, $run->id]);

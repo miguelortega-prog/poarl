@@ -138,10 +138,10 @@ final class ExcludeSinDatosContactoStep implements ProcessingStepInterface
             $rows = DB::select("
                 SELECT
                     TO_CHAR(NOW(), 'DD/MM/YYYY') as fecha_cruce,
-                    NUM_TOMADOR as numero_id_aportante,
+                    num_tomador as numero_id_aportante,
                     periodo,
                     ? as tipo_comunicado,
-                    VALOR_TOTAL_FACT as valor,
+                    valor_total_fact as valor,
                     'Sin datos de contacto' as motivo_exclusion
                 FROM data_source_bascar
                 WHERE run_id = ?

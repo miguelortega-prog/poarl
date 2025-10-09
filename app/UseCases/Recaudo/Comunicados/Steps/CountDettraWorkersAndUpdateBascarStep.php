@@ -158,20 +158,20 @@ final class CountDettraWorkersAndUpdateBascarStep implements ProcessingStepInter
                 observacion_trabajadores = NULL
             FROM (
                 SELECT
-                    NRO_DOCUMTO,
-                    COUNT(DISTINCT NIT) as count
+                    nro_documto,
+                    COUNT(DISTINCT nit) as count
                 FROM data_source_dettra
                 WHERE run_id = ?
-                    AND NRO_DOCUMTO IS NOT NULL
-                    AND NRO_DOCUMTO != ''
-                    AND NIT IS NOT NULL
-                    AND NIT != ''
-                GROUP BY NRO_DOCUMTO
+                    AND nro_documto IS NOT NULL
+                    AND nro_documto != ''
+                    AND nit IS NOT NULL
+                    AND nit != ''
+                GROUP BY nro_documto
             ) worker_counts
-            WHERE b.NUM_TOMADOR = worker_counts.NRO_DOCUMTO
+            WHERE b.num_tomador = worker_counts.nro_documto
                 AND b.run_id = ?
-                AND b.NUM_TOMADOR IS NOT NULL
-                AND b.NUM_TOMADOR != ''
+                AND b.num_tomador IS NOT NULL
+                AND b.num_tomador != ''
         ", [$run->id, $run->id]);
 
         Log::info('Registros actualizados con trabajadores de DETTRA', [

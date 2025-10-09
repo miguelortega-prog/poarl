@@ -23,10 +23,21 @@ use Illuminate\Support\Facades\Log;
  * - CLS_RICT: 'I' (número romano 1)
  * - FCH_INVI: '01010001' (valor fijo)
  * - TPO_COT: '0' (valor fijo)
+ * - FCH_FIN: 'NO REGISTRA' (valor fijo)
  * - TRAB_EXPUESTOS: 1 (valor fijo)
  */
 final class AppendBascarSinTrabajadoresStep implements ProcessingStepInterface
 {
+    /**
+     * Constantes para valores fijos en el archivo de detalle.
+     */
+    private const CLS_RICT = 'I';               // Número romano 1
+    private const FCH_INVI = '01010001';        // Fecha de inicio de vigencia fija
+    private const TPO_COT = '0';                // Tipo de cotizante
+    private const FCH_FIN = 'NO REGISTRA';      // Fecha fin (sin registro)
+    private const TRAB_EXPUESTOS = 1;           // Trabajadores expuestos por defecto
+    private const NRO_IDVI_DEFAULT = '';        // NRO_IDVI pendiente de definir
+
     public function __construct(
         private readonly FilesystemFactory $filesystem
     ) {
@@ -137,10 +148,10 @@ final class AppendBascarSinTrabajadoresStep implements ProcessingStepInterface
         while ($offset < $totalRecords) {
             $rows = DB::select("
                 SELECT
-                    IDENT_ASEGURADO,
-                    NUM_TOMADOR,
-                    NUM_POLIZA,
-                    VALOR_TOTAL_FACT
+                    ident_asegurado,
+                    num_tomador,
+                    num_poliza,
+                    valor_total_fact
                 FROM data_source_bascar
                 WHERE run_id = ?
                     AND observacion_trabajadores = 'Sin trabajadores activos'
@@ -150,28 +161,25 @@ final class AppendBascarSinTrabajadoresStep implements ProcessingStepInterface
             ", [$run->id, $chunkSize, $offset]);
 
             foreach ($rows as $row) {
-                // TODO: NRO_IDVI pendiente de definir - actualmente se deja vacío
-                $nroIdvi = '';
-
-                // TODO: NUM_POLIZA está quedando en notación científica en el job de almacenamiento
-                // Esto debe corregirse en LoadCsvDataSourcesJob o LoadExcelWithCopyJob
-                $poliza = $row->NUM_POLIZA ?? '';
+                // TODO: NUM_POLIZA puede estar quedando en notación científica en el job de almacenamiento
+                // Esto debe corregirse en LoadCsvDataSourcesJob o LoadExcelWithCopyJob si es necesario
+                $poliza = $row->num_poliza ?? '';
 
                 $newContent .= sprintf(
                     "%s;%s;%s;%s;%s;%s;%s;%s;%s;%s;%s;%s;%s\n",
-                    $row->IDENT_ASEGURADO ?? '',    // TPO_IDEN_TRABAJADOR
-                    $row->NUM_TOMADOR ?? '',         // NRO_IDEN
+                    $row->ident_asegurado ?? '',    // TPO_IDEN_TRABAJADOR
+                    $row->num_tomador ?? '',         // NRO_IDEN
                     $year,                           // AÑO
                     $month,                          // MES
-                    $row->IDENT_ASEGURADO ?? '',    // TPO_EMP
-                    $nroIdvi,                        // NRO_IDVI (TODO: pendiente definir)
-                    'I',                             // CLS_RICT (número romano 1)
-                    '01010001',                      // FCH_INVI (valor fijo)
-                    $poliza,                         // PÓLIZA (TODO: notación científica)
-                    $row->VALOR_TOTAL_FACT ?? 0,    // VALOR
-                    '0',                             // TPO_COT (valor fijo)
-                    'NO REGISTRA',                   // FCH_FIN (valor fijo)
-                    1                                // TRAB_EXPUESTOS (valor fijo)
+                    $row->ident_asegurado ?? '',    // TPO_EMP
+                    self::NRO_IDVI_DEFAULT,         // NRO_IDVI (pendiente definir)
+                    self::CLS_RICT,                 // CLS_RICT (número romano 1)
+                    self::FCH_INVI,                 // FCH_INVI (valor fijo)
+                    $poliza,                         // PÓLIZA
+                    $row->valor_total_fact ?? 0,    // VALOR
+                    self::TPO_COT,                  // TPO_COT (valor fijo)
+                    self::FCH_FIN,                  // FCH_FIN (valor fijo)
+                    self::TRAB_EXPUESTOS            // TRAB_EXPUESTOS (valor fijo)
                 );
                 $processedRows++;
             }

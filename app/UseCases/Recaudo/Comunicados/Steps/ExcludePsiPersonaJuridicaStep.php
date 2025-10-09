@@ -90,8 +90,8 @@ final class ExcludePsiPersonaJuridicaStep implements ProcessingStepInterface
             FROM data_source_bascar
             WHERE run_id = ?
                 AND UPPER(psi) = 'S'
-                AND LENGTH(NUM_TOMADOR) = 9
-                AND NUM_TOMADOR IS NOT NULL
+                AND LENGTH(num_tomador) = 9
+                AND num_tomador IS NOT NULL
         ", [$run->id])->count;
     }
 
@@ -141,7 +141,7 @@ final class ExcludePsiPersonaJuridicaStep implements ProcessingStepInterface
             $rows = DB::select("
                 SELECT
                     TO_CHAR(NOW(), 'DD/MM/YYYY') as fecha_cruce,
-                    NUM_TOMADOR as numero_id_aportante,
+                    num_tomador as numero_id_aportante,
                     periodo,
                     ? as tipo_comunicado,
                     valor_total_fact as valor,
@@ -149,8 +149,8 @@ final class ExcludePsiPersonaJuridicaStep implements ProcessingStepInterface
                 FROM data_source_bascar
                 WHERE run_id = ?
                     AND UPPER(psi) = 'S'
-                    AND LENGTH(NUM_TOMADOR) = 9
-                    AND NUM_TOMADOR IS NOT NULL
+                    AND LENGTH(num_tomador) = 9
+                    AND num_tomador IS NOT NULL
                 ORDER BY id
                 LIMIT ?
                 OFFSET ?
@@ -239,8 +239,8 @@ final class ExcludePsiPersonaJuridicaStep implements ProcessingStepInterface
             DELETE FROM data_source_bascar
             WHERE run_id = ?
                 AND UPPER(psi) = 'S'
-                AND LENGTH(NUM_TOMADOR) = 9
-                AND NUM_TOMADOR IS NOT NULL
+                AND LENGTH(num_tomador) = 9
+                AND num_tomador IS NOT NULL
         ", [$run->id]);
 
         Log::info('✅ Registros eliminados de BASCAR', [
