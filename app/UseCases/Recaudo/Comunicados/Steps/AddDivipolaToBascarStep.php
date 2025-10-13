@@ -44,46 +44,11 @@ final class AddDivipolaToBascarStep implements ProcessingStepInterface
     {
         Log::info('Agregando DIVIPOLA y dirección válida a BASCAR desde DIR_TOM/CIU_TOM y PAGPLA', ['run_id' => $run->id]);
 
-        $this->ensureColumnsExist($run);
+        // Nota: Las columnas divipola y direccion ya fueron creadas por CreateBascarIndexesStep (paso 2)
         $this->copyValidAddressFromDirTomCiuTom($run);
         $this->populateValidAddressFromPagpla($run);
 
         Log::info('DIVIPOLA y dirección válida agregados a BASCAR', ['run_id' => $run->id]);
-    }
-
-    /**
-     * Asegura que las columnas divipola y direccion existan en data_source_bascar.
-     */
-    private function ensureColumnsExist(CollectionNoticeRun $run): void
-    {
-        // Verificar si la columna divipola existe
-        $divipolaExists = DB::selectOne("
-            SELECT COUNT(*) as count
-            FROM information_schema.columns
-            WHERE table_name = 'data_source_bascar'
-                AND column_name = 'divipola'
-        ")->count > 0;
-
-        if (!$divipolaExists) {
-            DB::statement("
-                ALTER TABLE data_source_bascar
-                ADD COLUMN divipola VARCHAR(10) NULL
-            ");
-        }
-
-        $direccionExists = DB::selectOne("
-            SELECT COUNT(*) as count
-            FROM information_schema.columns
-            WHERE table_name = 'data_source_bascar'
-                AND column_name = 'direccion'
-        ")->count > 0;
-
-        if (!$direccionExists) {
-            DB::statement("
-                ALTER TABLE data_source_bascar
-                ADD COLUMN direccion TEXT NULL
-            ");
-        }
     }
 
     /**

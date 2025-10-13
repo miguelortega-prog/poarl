@@ -38,6 +38,7 @@ final class SanitizeDateFieldsStep implements ProcessingStepInterface
      * Formato: 'tabla' => ['columna1', 'columna2', ...]
      */
     private const DATE_FIELDS = [
+        'data_source_bascar' => ['fecha_inicio_vig', 'fecha_finalizacion', 'fecha_expedicion'],
         'data_source_dettra' => ['fecha_ini_cobert', 'fech_nacim'],
     ];
 

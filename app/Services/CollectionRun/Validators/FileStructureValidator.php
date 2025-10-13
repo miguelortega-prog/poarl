@@ -7,17 +7,17 @@ namespace App\Services\CollectionRun\Validators;
 use App\Models\CollectionNoticeRunFile;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Support\Facades\Log;
-use PhpOffice\PhpSpreadsheet\IOFactory;
-use PhpOffice\PhpSpreadsheet\Reader\Exception as ReaderException;
-use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 use RuntimeException;
 use Throwable;
+use XMLReader;
+use ZipArchive;
 
 /**
  * Validador de estructura de archivos CSV/Excel con soporte para:
  * - Lectura por chunks (grandes volúmenes)
  * - Múltiples hojas en Excel
  * - Validación de estructura sin cargar todo en memoria
+ * - Validación de XLSX mediante XMLReader (rápido, sin PhpSpreadsheet)
  *
  * Principios SOLID aplicados:
  * - Single Responsibility: Solo valida estructura de archivos
@@ -194,8 +194,8 @@ final readonly class FileStructureValidator
 
     /**
      * Valida un archivo Excel (XLS/XLSX) con múltiples hojas.
-     * Para archivos XLSX grandes (>100MB), usa XMLReader para mejor rendimiento.
-     * Para archivos XLS grandes, no se valida estructura (formato legacy raro).
+     * - XLSX: Usa XMLReader (rápido, sin PhpSpreadsheet)
+     * - XLS: Validación simplificada (formato legacy)
      *
      * @param array<int, string> $expectedColumns
      *
@@ -206,12 +206,11 @@ final readonly class FileStructureValidator
         CollectionNoticeRunFile $file,
         array $expectedColumns
     ): void {
-        $isLargeFile = $file->size > 100 * 1024 * 1024;
         $extension = strtolower($file->ext ?? '');
 
-        // Para archivos XLSX grandes (>100MB), usar XMLReader (rápido, no se bloquea)
-        if ($isLargeFile && $extension === 'xlsx') {
-            Log::info('Archivo XLSX grande, usando XMLReader para validación', [
+        // Para archivos XLSX: SIEMPRE usar XMLReader (rápido, sin PhpSpreadsheet)
+        if ($extension === 'xlsx') {
+            Log::info('Validando archivo XLSX con XMLReader', [
                 'file_id' => $file->id,
                 'file_name' => $file->original_name,
                 'size_mb' => round($file->size / 1024 / 1024, 2),
@@ -221,24 +220,27 @@ final readonly class FileStructureValidator
             return;
         }
 
-        // Para archivos XLS grandes (formato legacy), no validar estructura
-        if ($isLargeFile && $extension === 'xls') {
-            Log::warning('Archivo XLS grande, validación simplificada (formato legacy)', [
+        // Para archivos XLS (formato legacy): validación simplificada
+        if ($extension === 'xls') {
+            Log::warning('Archivo XLS detectado, validación simplificada (formato legacy)', [
                 'file_id' => $file->id,
                 'file_name' => $file->original_name,
                 'size_mb' => round($file->size / 1024 / 1024, 2),
             ]);
 
-            // Solo verificar que el archivo existe
+            // Solo verificar que el archivo existe y es legible
             $stream = $disk->readStream($file->path);
             if ($stream === false) {
                 throw new RuntimeException(
                     sprintf('No se pudo leer el archivo "%s"', $file->original_name)
                 );
             }
-            fclose($stream);
 
-            Log::info('Archivo XLS grande validado (verificación básica)', [
+            if (is_resource($stream)) {
+                fclose($stream);
+            }
+
+            Log::info('Archivo XLS validado (verificación básica de lectura)', [
                 'file_id' => $file->id,
                 'file_name' => $file->original_name,
             ]);
@@ -246,149 +248,12 @@ final readonly class FileStructureValidator
             return;
         }
 
-        // Para archivos < 100MB, validación completa
-        $tempPath = sys_get_temp_dir() . '/' . uniqid('excel_validation_', true);
-
-        try {
-            $stream = $disk->readStream($file->path);
-
-            if ($stream === false) {
-                throw new RuntimeException(
-                    sprintf('No se pudo leer el archivo "%s"', $file->original_name)
-                );
-            }
-
-            file_put_contents($tempPath, $stream);
-
-            if (is_resource($stream)) {
-                fclose($stream);
-            }
-
-            $reader = IOFactory::createReaderForFile($tempPath);
-            $reader->setReadDataOnly(true);
-            $reader->setReadEmptyCells(false);
-            $reader->setReadFilter(new class implements \PhpOffice\PhpSpreadsheet\Reader\IReadFilter {
-                public function readCell(string $columnAddress, int $row, string $worksheetName = ''): bool
-                {
-                    return $row === 1;
-                }
-            });
-
-            $spreadsheet = $reader->load($tempPath);
-            $sheetCount = $spreadsheet->getSheetCount();
-
-            if ($sheetCount === 0) {
-                throw new RuntimeException(
-                    sprintf('El archivo "%s" no contiene hojas.', $file->original_name)
-                );
-            }
-
-            Log::info('Validando archivo Excel', [
-                'file_id' => $file->id,
-                'file_name' => $file->original_name,
-                'sheet_count' => $sheetCount,
-            ]);
-
-            $sheetsValidated = 0;
-            $sheetsWithErrors = [];
-
-            for ($sheetIndex = 0; $sheetIndex < $sheetCount; $sheetIndex++) {
-                $worksheet = $spreadsheet->getSheet($sheetIndex);
-                $sheetName = $worksheet->getTitle();
-
-                try {
-                    $this->validateExcelSheet($worksheet, $expectedColumns, $sheetName, $file->original_name);
-                    $sheetsValidated++;
-
-                    Log::debug('Hoja de Excel validada', [
-                        'file_id' => $file->id,
-                        'sheet_index' => $sheetIndex,
-                        'sheet_name' => $sheetName,
-                    ]);
-                } catch (RuntimeException $exception) {
-                    $sheetsWithErrors[] = sprintf(
-                        'Hoja "%s": %s',
-                        $sheetName,
-                        $exception->getMessage()
-                    );
-                }
-            }
-
-            if ($sheetsWithErrors !== []) {
-                throw new RuntimeException(
-                    sprintf(
-                        'El archivo "%s" tiene hojas con errores de estructura: %s',
-                        $file->original_name,
-                        implode(' | ', $sheetsWithErrors)
-                    )
-                );
-            }
-
-            Log::info('Todas las hojas del archivo Excel validadas exitosamente', [
-                'file_id' => $file->id,
-                'file_name' => $file->original_name,
-                'sheets_validated' => $sheetsValidated,
-            ]);
-        } catch (ReaderException $exception) {
-            throw new RuntimeException(
-                sprintf(
-                    'Error al leer el archivo Excel "%s": %s',
-                    $file->original_name,
-                    $exception->getMessage()
-                ),
-                previous: $exception
-            );
-        } finally {
-            if (file_exists($tempPath)) {
-                unlink($tempPath);
-            }
-        }
+        // Formato no soportado
+        throw new RuntimeException(
+            sprintf('Formato de Excel no soportado: %s', $extension)
+        );
     }
 
-    /**
-     * Valida una hoja individual de Excel.
-     *
-     * @param array<int, string> $expectedColumns
-     *
-     * @throws RuntimeException
-     */
-    private function validateExcelSheet(
-        Worksheet $worksheet,
-        array $expectedColumns,
-        string $sheetName,
-        string $fileName
-    ): void {
-        // Verificar que la hoja tenga datos
-        if ($worksheet->getHighestRow() < 1) {
-            throw new RuntimeException(
-                sprintf('La hoja "%s" está vacía', $sheetName)
-            );
-        }
-
-        // Obtener primera fila (encabezados) de forma eficiente
-        $headers = [];
-        $highestColumn = $worksheet->getHighestColumn();
-        $highestColumnIndex = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::columnIndexFromString($highestColumn);
-
-        for ($col = 1; $col <= $highestColumnIndex; $col++) {
-            $cellValue = $worksheet->getCellByColumnAndRow($col, 1)->getValue();
-            $header = trim((string) $cellValue);
-
-            // Solo agregar columnas no vacías
-            if ($header !== '') {
-                $headers[] = $header;
-            }
-        }
-
-        if ($headers === []) {
-            throw new RuntimeException(
-                sprintf('La hoja "%s" no tiene encabezados', $sheetName)
-            );
-        }
-
-        // Validar columnas
-        $this->validateColumns($headers, $expectedColumns, sprintf('%s [%s]', $fileName, $sheetName));
-    }
 
     /**
      * Valida que las columnas del archivo coincidan con las esperadas.
@@ -448,13 +313,18 @@ final readonly class FileStructureValidator
     }
 
     /**
-     * Valida un archivo XLSX grande usando XMLReader (sin PhpSpreadsheet).
+     * Valida un archivo XLSX usando XMLReader (sin PhpSpreadsheet).
      *
      * XLSX es un archivo ZIP que contiene XMLs. Esta función:
      * 1. Descomprime el archivo temporalmente
      * 2. Lee xl/workbook.xml para obtener nombres de hojas
      * 3. Lee xl/worksheets/sheetN.xml para extraer headers (fila 1)
      * 4. Valida headers contra columnas esperadas
+     *
+     * Ventajas sobre PhpSpreadsheet:
+     * - Mucho más rápido (no carga el archivo completo en memoria)
+     * - Consume menos memoria
+     * - No se bloquea con archivos grandes
      *
      * @param array<int, string> $expectedColumns
      *
@@ -483,7 +353,7 @@ final readonly class FileStructureValidator
             }
 
             // Abrir ZIP
-            $zip = new \ZipArchive();
+            $zip = new ZipArchive();
             if ($zip->open($tempZipPath) !== true) {
                 throw new RuntimeException(
                     sprintf('El archivo "%s" no es un XLSX válido (no se pudo abrir como ZIP)', $file->original_name)
@@ -508,14 +378,20 @@ final readonly class FileStructureValidator
                 );
             }
 
-            Log::info('Validando XLSX con XMLReader', [
+            Log::info('Iniciando validación de XLSX con XMLReader', [
                 'file_id' => $file->id,
                 'file_name' => $file->original_name,
                 'sheet_count' => count($sheetNames),
+                'size_mb' => round($file->size / 1024 / 1024, 2),
             ]);
 
             // Leer shared strings (si existe)
             $sharedStrings = $this->loadSharedStrings($extractPath);
+
+            Log::debug('Shared strings cargados', [
+                'file_id' => $file->id,
+                'shared_strings_count' => count($sharedStrings),
+            ]);
 
             // Validar cada hoja
             $sheetsValidated = 0;
@@ -534,8 +410,9 @@ final readonly class FileStructureValidator
                     $this->validateColumns($headers, $expectedColumns, sprintf('%s [%s]', $file->original_name, $sheetName));
                     $sheetsValidated++;
 
-                    Log::debug('Hoja XLSX validada con XMLReader', [
+                    Log::debug('Hoja XLSX validada correctamente', [
                         'file_id' => $file->id,
+                        'sheet_index' => $index,
                         'sheet_name' => $sheetName,
                         'headers_count' => count($headers),
                     ]);
@@ -554,10 +431,11 @@ final readonly class FileStructureValidator
                 );
             }
 
-            Log::info('Archivo XLSX grande validado exitosamente con XMLReader', [
+            Log::info('Archivo XLSX validado exitosamente con XMLReader', [
                 'file_id' => $file->id,
                 'file_name' => $file->original_name,
                 'sheets_validated' => $sheetsValidated,
+                'size_mb' => round($file->size / 1024 / 1024, 2),
             ]);
         } finally {
             // Limpiar archivos temporales
@@ -633,14 +511,21 @@ final readonly class FileStructureValidator
     }
 
     /**
-     * Extrae headers (primera fila) de un archivo sheet XML.
+     * Extrae headers (primera fila) de un archivo sheet XML usando XMLReader.
      *
-     * @param array<int, string> $sharedStrings
-     * @return array<int, string>
+     * Lee solo la primera fila del archivo para extraer los encabezados de columnas.
+     * Maneja shared strings correctamente.
+     *
+     * @param string $sheetFile Ruta al archivo sheet XML
+     * @param array<int, string> $sharedStrings Array de shared strings
+     *
+     * @return array<int, string> Headers de la primera fila
+     *
+     * @throws RuntimeException
      */
     private function extractHeadersFromSheet(string $sheetFile, array $sharedStrings): array
     {
-        $reader = new \XMLReader();
+        $reader = new XMLReader();
         if (!$reader->open($sheetFile)) {
             throw new RuntimeException('No se pudo abrir el archivo sheet XML');
         }
@@ -648,40 +533,51 @@ final readonly class FileStructureValidator
         $headers = [];
         $inFirstRow = false;
 
-        while ($reader->read()) {
-            if ($reader->nodeType === \XMLReader::ELEMENT && $reader->name === 'row') {
-                $rowNum = $reader->getAttribute('r');
-                if ($rowNum === '1') {
-                    $inFirstRow = true;
-                }
-            }
-
-            if ($inFirstRow && $reader->nodeType === \XMLReader::ELEMENT && $reader->name === 'c') {
-                $cellType = $reader->getAttribute('t');
-                $cellValue = '';
-
-                // Leer contenido de la celda
-                if ($reader->read() && $reader->name === 'v') {
-                    $cellValue = $reader->readString();
-
-                    // Si es tipo 's', es referencia a sharedStrings
-                    if ($cellType === 's' && isset($sharedStrings[(int) $cellValue])) {
-                        $cellValue = $sharedStrings[(int) $cellValue];
+        try {
+            while ($reader->read()) {
+                // Detectar inicio de fila
+                if ($reader->nodeType === XMLReader::ELEMENT && $reader->name === 'row') {
+                    $rowNum = $reader->getAttribute('r');
+                    if ($rowNum === '1') {
+                        $inFirstRow = true;
                     }
                 }
 
-                $headers[] = trim($cellValue);
-            }
+                // Leer celdas de la primera fila
+                if ($inFirstRow && $reader->nodeType === XMLReader::ELEMENT && $reader->name === 'c') {
+                    $cellType = $reader->getAttribute('t');
+                    $cellValue = '';
 
-            if ($inFirstRow && $reader->nodeType === \XMLReader::END_ELEMENT && $reader->name === 'row') {
-                break; // Ya procesamos la primera fila
+                    // Leer contenido de la celda
+                    if ($reader->read() && $reader->name === 'v') {
+                        $cellValue = $reader->readString();
+
+                        // Si es tipo 's', es referencia a sharedStrings
+                        if ($cellType === 's' && isset($sharedStrings[(int) $cellValue])) {
+                            $cellValue = $sharedStrings[(int) $cellValue];
+                        }
+                    }
+
+                    $headers[] = trim($cellValue);
+                }
+
+                // Finalizar lectura cuando termina la primera fila
+                if ($inFirstRow && $reader->nodeType === XMLReader::END_ELEMENT && $reader->name === 'row') {
+                    break; // Ya procesamos la primera fila
+                }
             }
+        } finally {
+            $reader->close();
         }
 
-        $reader->close();
-
         // Filtrar headers vacíos
-        return array_filter($headers, fn($h) => $h !== '');
+        $filteredHeaders = array_filter($headers, fn($h) => $h !== '');
+
+        if ($filteredHeaders === []) {
+            throw new RuntimeException('La hoja no contiene encabezados en la primera fila');
+        }
+
+        return $filteredHeaders;
     }
 
     /**

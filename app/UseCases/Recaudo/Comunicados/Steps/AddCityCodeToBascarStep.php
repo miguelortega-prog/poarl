@@ -33,55 +33,10 @@ final class AddCityCodeToBascarStep implements ProcessingStepInterface
     {
         Log::info('Agregando código de ciudad y departamento a BASCAR desde DATPOL', ['run_id' => $run->id]);
 
-        $this->ensureCityCodeColumn();
-        $this->ensureDepartamentoColumn();
+        // Nota: Las columnas city_code y departamento ya fueron creadas por CreateBascarIndexesStep (paso 2)
         $this->updateCityCodeAndDepartamentoFromDatpol($run);
 
         Log::info('Código de ciudad y departamento agregados a BASCAR', ['run_id' => $run->id]);
-    }
-
-    /**
-     * Asegura que exista la columna city_code en BASCAR.
-     */
-    private function ensureCityCodeColumn(): void
-    {
-        $tableName = 'data_source_bascar';
-
-        if ($this->columnExists($tableName, 'city_code')) {
-            return;
-        }
-
-        DB::statement("
-            ALTER TABLE {$tableName}
-            ADD COLUMN city_code VARCHAR(10)
-        ");
-
-        DB::statement("
-            CREATE INDEX IF NOT EXISTS idx_{$tableName}_city_code
-            ON {$tableName}(city_code)
-        ");
-    }
-
-    /**
-     * Asegura que exista la columna departamento en BASCAR.
-     */
-    private function ensureDepartamentoColumn(): void
-    {
-        $tableName = 'data_source_bascar';
-
-        if ($this->columnExists($tableName, 'departamento')) {
-            return;
-        }
-
-        DB::statement("
-            ALTER TABLE {$tableName}
-            ADD COLUMN departamento VARCHAR(10)
-        ");
-
-        DB::statement("
-            CREATE INDEX IF NOT EXISTS idx_{$tableName}_departamento
-            ON {$tableName}(departamento)
-        ");
     }
 
     /**
@@ -109,20 +64,5 @@ final class AddCityCodeToBascarStep implements ProcessingStepInterface
         ", [$run->id, $run->id]);
 
         return $updated;
-    }
-
-    /**
-     * Verifica si una columna existe en una tabla.
-     */
-    private function columnExists(string $tableName, string $columnName): bool
-    {
-        $result = DB::select("
-            SELECT column_name
-            FROM information_schema.columns
-            WHERE table_name = ?
-            AND column_name = ?
-        ", [$tableName, $columnName]);
-
-        return count($result) > 0;
     }
 }

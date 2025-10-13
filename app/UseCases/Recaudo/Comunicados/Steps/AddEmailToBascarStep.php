@@ -36,32 +36,11 @@ final class AddEmailToBascarStep implements ProcessingStepInterface
     {
         Log::info('Agregando email válido a BASCAR desde email_tom y PAGPLA', ['run_id' => $run->id]);
 
-        $this->ensureEmailColumnExists($run);
+        // Nota: La columna email ya fue creada por CreateBascarIndexesStep (paso 2)
         $this->copyValidEmailFromEmailTom($run);
         $this->populateValidEmailFromPagpla($run);
 
         Log::info('Email válido agregado a BASCAR', ['run_id' => $run->id]);
-    }
-
-    /**
-     * Asegura que la columna email exista en data_source_bascar.
-     */
-    private function ensureEmailColumnExists(CollectionNoticeRun $run): void
-    {
-        // Verificar si la columna ya existe
-        $exists = DB::selectOne("
-            SELECT COUNT(*) as count
-            FROM information_schema.columns
-            WHERE table_name = 'data_source_bascar'
-                AND column_name = 'email'
-        ")->count > 0;
-
-        if (!$exists) {
-            DB::statement("
-                ALTER TABLE data_source_bascar
-                ADD COLUMN email VARCHAR(255) NULL
-            ");
-        }
     }
 
     /**

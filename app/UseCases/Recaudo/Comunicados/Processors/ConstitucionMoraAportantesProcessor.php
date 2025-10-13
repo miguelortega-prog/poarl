@@ -139,7 +139,7 @@ final class ConstitucionMoraAportantesProcessor extends BaseCollectionNoticeProc
     protected function defineSteps(): array
     {
         return [
-            // === FASE 1: VALIDACIÓN DE DATOS CARGADOS ===
+            // === FASE 1: VALIDACIÓN Y PREPARACIÓN ===
 
             // Paso 1: Validar integridad de datos en BD
             // Verifica que los jobs previos cargaron correctamente:
@@ -147,37 +147,38 @@ final class ConstitucionMoraAportantesProcessor extends BaseCollectionNoticeProc
             // - DETTRA, PAGAPL, PAGPLA (LoadExcelWithCopyJob)
             $this->validateDataStep,
 
-            // Paso 2: Sanitizar campos numéricos (formato europeo → estándar)
+            // Paso 2: Preparar estructura de BASCAR (columnas e índices)
+            // IMPORTANTE: Este paso crea TODAS las columnas e índices necesarios de forma idempotente
+            // Esto garantiza que los pasos posteriores puedan asumir que la estructura ya está lista
+            // Columnas creadas: composite_key, tipo_de_envio, consecutivo, email, divipola, direccion,
+            //                   city_code, departamento, cantidad_trabajadores, observacion_trabajadores, psi
+            // Índices creados: idx_bascar_tipo_envio, idx_bascar_num_tomador, idx_bascar_run_id,
+            //                  idx_bascar_run_num_tomador, idx_bascar_psi, idx_bascar_composite_key
+            $this->createBascarIndexesStep,
+
+            // === FASE 2: SANITIZACIÓN DE DATOS ===
+
+            // Paso 3: Sanitizar campos numéricos (formato europeo → estándar)
             // Limpia campos numéricos que vienen con separadores europeos:
             // - Entrada: "1.234.567,89" (punto = miles, coma = decimal)
             // - Salida: "1234567.89" (sin separador de miles, punto = decimal)
             // Actualmente sanitiza: BASCAR.valor_total_fact
             $this->sanitizeNumericFieldsStep,
 
-            // Paso 3: Sanitizar campos de fecha (normalizar a formato YYYY-MM-DD)
+            // Paso 4: Sanitizar campos de fecha (normalizar a formato YYYY-MM-DD)
             // Convierte fechas de diferentes formatos (DD/MM/YYYY, seriales Excel, etc.) a formato ISO estándar
             // - Entrada: "15/01/2024", "44927" (serial Excel)
             // - Salida: "2024-01-15"
             // Actualmente sanitiza: DETTRA.fecha_ini_cobert, DETTRA.fech_nacim
             $this->sanitizeDateFieldsStep,
 
-            // Paso 4: Sanitizar CIU_TOM (convertir nombres de ciudades a códigos)
+            // Paso 5: Sanitizar CIU_TOM (convertir nombres de ciudades a códigos)
             // Algunos registros tienen el NOMBRE de la ciudad en lugar del código DIVIPOLA
             // Busca en tabla city_depto y actualiza si hay coincidencia única:
             // - "MEDELLIN" → busca en city_depto.name_city
             // - Si encuentra 1 coincidencia → actualiza CIU_TOM = "05001"
             // - Si encuentra 0 o múltiples coincidencias → NO actualiza (ambiguo)
             $this->sanitizeCiuTomStep,
-
-            // === FASE 2: OPTIMIZACIÓN DE ÍNDICES ===
-
-            // Paso 5: Crear índices en data_source_bascar (idempotente)
-            // Crea índices para optimizar operaciones posteriores:
-            // - idx_bascar_tipo_envio: Para loadTipoEnvioMap() en ExportBascarToExcelStep
-            // - idx_bascar_num_tomador: Para búsquedas por NIT
-            // - idx_bascar_run_id: Para filtros por run_id
-            // - idx_bascar_run_num_tomador: Para loadTipoEnvioMap() con filtro run_id
-            $this->createBascarIndexesStep,
 
             // === FASE 3: FILTRADO DE DATOS POR PERIODO ===
 

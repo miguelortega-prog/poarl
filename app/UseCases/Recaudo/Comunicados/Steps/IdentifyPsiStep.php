@@ -13,9 +13,10 @@ use Illuminate\Support\Facades\Log;
  * Step: Identificar PSI (Póliza de Seguro Independiente).
  *
  * Cruza BASCAR con BAPRPO para identificar si el aportante tiene póliza independiente:
- * 1. Crea columna 'psi' en data_source_bascar
- * 2. Crea índices en NUM_TOMADOR (BASCAR) y tomador (BAPRPO)
- * 3. Actualiza BASCAR.psi con BAPRPO.pol_independiente donde coinciden
+ * 1. Crea índices en NUM_TOMADOR (BASCAR) y tomador (BAPRPO) si no existen
+ * 2. Actualiza BASCAR.psi con BAPRPO.pol_independiente donde coinciden
+ *
+ * Nota: La columna 'psi' y su índice ya fueron creados por CreateBascarIndexesStep (paso 2)
  *
  * Mapeo de columnas (validado con cliente):
  * - BASCAR: Campo NIT -> NUM_TOMADOR
@@ -43,33 +44,11 @@ final class IdentifyPsiStep implements ProcessingStepInterface
     {
         Log::info('Identificando PSI en BASCAR desde BAPRPO', ['run_id' => $run->id]);
 
-        $this->ensurePsiColumn();
+        // Nota: La columna psi y su índice ya fueron creados por CreateBascarIndexesStep (paso 2)
         $this->ensureNitIndexes();
         $this->updatePsiFromBaprpo($run);
 
         Log::info('Identificación de PSI completada', ['run_id' => $run->id]);
-    }
-
-    /**
-     * Asegura que exista la columna 'psi' en data_source_bascar.
-     */
-    private function ensurePsiColumn(): void
-    {
-        $tableName = 'data_source_bascar';
-
-        if ($this->columnExists($tableName, 'psi')) {
-            return;
-        }
-
-        DB::statement("
-            ALTER TABLE {$tableName}
-            ADD COLUMN psi VARCHAR(10)
-        ");
-
-        DB::statement("
-            CREATE INDEX IF NOT EXISTS idx_{$tableName}_psi
-            ON {$tableName}(psi)
-        ");
     }
 
     /**
@@ -109,21 +88,6 @@ final class IdentifyPsiStep implements ProcessingStepInterface
                 AND baprpo.tomador IS NOT NULL
                 AND baprpo.tomador != ''
         ", [$run->id, $run->id]);
-    }
-
-    /**
-     * Verifica si una columna existe en una tabla.
-     */
-    private function columnExists(string $tableName, string $columnName): bool
-    {
-        $result = DB::select("
-            SELECT column_name
-            FROM information_schema.columns
-            WHERE table_name = ?
-            AND column_name = ?
-        ", [$tableName, $columnName]);
-
-        return count($result) > 0;
     }
 
     /**

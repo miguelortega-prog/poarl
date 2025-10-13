@@ -36,11 +36,7 @@ final class GenerateBascarCompositeKeyStep implements ProcessingStepInterface
 
         Log::info('Generando llaves compuestas en BASCAR', ['run_id' => $run->id]);
 
-        // Crear columna composite_key si no existe
-        if (!$this->columnExists($tableName, 'composite_key')) {
-            DB::statement("ALTER TABLE {$tableName} ADD COLUMN composite_key VARCHAR(255)");
-            DB::statement("CREATE INDEX IF NOT EXISTS idx_{$tableName}_composite_key ON {$tableName}(composite_key)");
-        }
+        // Nota: La columna composite_key y su índice ya fueron creados por CreateBascarIndexesStep (paso 2)
 
         // Generar composite_key = TRIM(num_tomador) || periodo
         DB::update("
@@ -66,21 +62,6 @@ final class GenerateBascarCompositeKeyStep implements ProcessingStepInterface
             );
         }
 
-        Log::info('Llaves compuestas generadas en BASCAR', ['run_id' => $run->id]);
-    }
-
-    /**
-     * Verifica si una columna existe en una tabla.
-     */
-    private function columnExists(string $tableName, string $columnName): bool
-    {
-        $result = DB::select("
-            SELECT column_name
-            FROM information_schema.columns
-            WHERE table_name = ?
-            AND column_name = ?
-        ", [$tableName, $columnName]);
-
-        return count($result) > 0;
+        Log::info('Llaves compuestas generadas en BASCAR', ['run_id' => $run->id, 'keys_generated' => $keysGenerated]);
     }
 }

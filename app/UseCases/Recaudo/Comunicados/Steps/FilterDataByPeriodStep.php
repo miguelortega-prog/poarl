@@ -19,10 +19,12 @@ use Illuminate\Support\Facades\Log;
  *    - Se procesan todos los registros
  *
  * 2. Si periodo = YYYYMM (ej: "202508"):
- *    - En BASCAR: Crea columna 'periodo' extrayendo de fecha_inicio_vig (DD/MM/YYYY → YYYYMM)
+ *    - En BASCAR: Extrae periodo de fecha_inicio_vig (DD/MM/YYYY → YYYYMM)
  *    - En BASCAR: Elimina registros donde periodo != periodo_run
  *    - En PAGAPL: Filtra por sheet_name que contenga el año (YYYY) del periodo
  *    - En PAGAPL: Elimina hojas donde sheet_name no contenga el año
+ *
+ * Nota: La columna 'periodo' ya fue creada por CreateBascarIndexesStep (paso 2)
  */
 final class FilterDataByPeriodStep implements ProcessingStepInterface
 {
@@ -56,30 +58,40 @@ final class FilterDataByPeriodStep implements ProcessingStepInterface
 
     /**
      * Filtra tabla BASCAR por periodo:
-     * 1. Crea columna 'periodo' si no existe
-     * 2. Extrae periodo de fecha_inicio_vig (DD/MM/YYYY → YYYYMM)
-     * 3. Elimina registros que no correspondan al periodo del run
+     * 1. Extrae periodo de fecha_inicio_vig (DD/MM/YYYY o YYYY-MM-DD → YYYYMM)
+     * 2. Elimina registros que no correspondan al periodo del run
+     *
+     * Nota: La columna 'periodo' ya fue creada por CreateBascarIndexesStep (paso 2)
+     * Nota: fecha_inicio_vig fue sanitizada previamente a formato YYYY-MM-DD por SanitizeDateFieldsStep (paso 4)
      */
     private function filterBascarByPeriod(CollectionNoticeRun $run): void
     {
         $tableName = 'data_source_bascar';
 
-        // Crear columna 'periodo' si no existe
-        if (!$this->columnExists($tableName, 'periodo')) {
-            DB::statement("ALTER TABLE {$tableName} ADD COLUMN periodo VARCHAR(6)");
-        }
-
         // Extraer periodo de fecha_inicio_vig
+        // Maneja dos formatos:
+        // - DD/MM/YYYY (formato original del CSV)
+        // - YYYY-MM-DD (formato sanitizado por SanitizeDateFieldsStep)
         DB::statement("
             UPDATE {$tableName}
-            SET periodo = CONCAT(
-                SPLIT_PART(fecha_inicio_vig, '/', 3),
-                LPAD(SPLIT_PART(fecha_inicio_vig, '/', 2), 2, '0')
-            )
+            SET periodo = CASE
+                -- Si es formato YYYY-MM-DD (sanitizado): extraer YYYYMM
+                WHEN fecha_inicio_vig ~ '^\d{4}-\d{2}-\d{2}$' THEN
+                    CONCAT(
+                        SUBSTRING(fecha_inicio_vig, 1, 4),
+                        SUBSTRING(fecha_inicio_vig, 6, 2)
+                    )
+                -- Si es formato DD/MM/YYYY (original): extraer YYYYMM
+                WHEN fecha_inicio_vig ~ '^[0-9]{1,2}/[0-9]{1,2}/[0-9]{4}$' THEN
+                    CONCAT(
+                        SPLIT_PART(fecha_inicio_vig, '/', 3),
+                        LPAD(SPLIT_PART(fecha_inicio_vig, '/', 2), 2, '0')
+                    )
+                ELSE NULL
+            END
             WHERE run_id = ?
             AND fecha_inicio_vig IS NOT NULL
             AND fecha_inicio_vig != ''
-            AND fecha_inicio_vig ~ '^[0-9]{1,2}/[0-9]{1,2}/[0-9]{4}$'
         ", [$run->id]);
 
         // Eliminar registros que no correspondan al periodo
@@ -158,20 +170,5 @@ final class FilterDataByPeriodStep implements ProcessingStepInterface
         }
 
         return true;
-    }
-
-    /**
-     * Verifica si una columna existe en una tabla.
-     */
-    private function columnExists(string $tableName, string $columnName): bool
-    {
-        $result = DB::select("
-            SELECT column_name
-            FROM information_schema.columns
-            WHERE table_name = ?
-            AND column_name = ?
-        ", [$tableName, $columnName]);
-
-        return count($result) > 0;
     }
 }

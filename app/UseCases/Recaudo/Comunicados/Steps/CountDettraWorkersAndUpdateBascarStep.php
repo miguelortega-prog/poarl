@@ -41,33 +41,11 @@ final class CountDettraWorkersAndUpdateBascarStep implements ProcessingStepInter
     {
         Log::info('Contando trabajadores activos de DETTRA', ['run_id' => $run->id]);
 
-        $this->ensureBascarColumns();
+        // Nota: Las columnas cantidad_trabajadores y observacion_trabajadores ya fueron creadas por CreateBascarIndexesStep (paso 2)
         $this->updateBascarWithWorkerCount($run);
         $this->updateBascarWithoutWorkers($run);
 
         Log::info('Conteo de trabajadores completado', ['run_id' => $run->id]);
-    }
-
-    /**
-     * Asegura que existan las columnas de trabajadores en BASCAR.
-     */
-    private function ensureBascarColumns(): void
-    {
-        $tableName = 'data_source_bascar';
-
-        if (!$this->columnExists($tableName, 'cantidad_trabajadores')) {
-            DB::statement("
-                ALTER TABLE {$tableName}
-                ADD COLUMN cantidad_trabajadores INTEGER
-            ");
-        }
-
-        if (!$this->columnExists($tableName, 'observacion_trabajadores')) {
-            DB::statement("
-                ALTER TABLE {$tableName}
-                ADD COLUMN observacion_trabajadores TEXT
-            ");
-        }
     }
 
     /**
@@ -123,20 +101,5 @@ final class CountDettraWorkersAndUpdateBascarStep implements ProcessingStepInter
         ", [$run->id]);
 
         return $updated;
-    }
-
-    /**
-     * Verifica si una columna existe en una tabla.
-     */
-    private function columnExists(string $tableName, string $columnName): bool
-    {
-        $result = DB::select("
-            SELECT column_name
-            FROM information_schema.columns
-            WHERE table_name = ?
-            AND column_name = ?
-        ", [$tableName, $columnName]);
-
-        return count($result) > 0;
     }
 }

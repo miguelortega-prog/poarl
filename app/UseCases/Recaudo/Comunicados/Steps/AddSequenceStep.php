@@ -35,27 +35,10 @@ final class AddSequenceStep implements ProcessingStepInterface
     {
         Log::info('Generando consecutivos', ['run_id' => $run->id]);
 
-        $this->ensureConsecutivoColumnExists($run);
+        // Nota: La columna consecutivo ya fue creada por CreateBascarIndexesStep (paso 2)
         $this->generateConsecutivos($run);
 
         Log::info('Consecutivos generados', ['run_id' => $run->id]);
-    }
-
-    /**
-     * Asegura que la columna consecutivo exista en data_source_bascar.
-     */
-    private function ensureConsecutivoColumnExists(CollectionNoticeRun $run): void
-    {
-        $exists = DB::selectOne("
-            SELECT COUNT(*) as count
-            FROM information_schema.columns
-            WHERE table_name = 'data_source_bascar'
-                AND column_name = 'consecutivo'
-        ")->count > 0;
-
-        if (!$exists) {
-            DB::statement("ALTER TABLE data_source_bascar ADD COLUMN consecutivo VARCHAR(100) NULL");
-        }
     }
 
     /**
