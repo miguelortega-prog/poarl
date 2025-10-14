@@ -49,11 +49,22 @@ final class AddNamesToDettraFromBasactStep implements ProcessingStepInterface
 
         $updated = $this->addNamesToDettra($run);
 
+        // Contar cuántos registros tienen nombres válidos (no NULL, no vacío)
+        $withValidNames = DB::table('data_source_dettra')
+            ->where('run_id', $run->id)
+            ->whereNotNull('nombres')
+            ->where('nombres', '!=', '')
+            ->count();
+
+        $withoutNames = $totalBefore - $withValidNames;
+
         Log::info('Nombres agregados a DETTRA desde BASACT', [
             'run_id' => $run->id,
             'total_dettra' => $totalBefore,
-            'nombres_agregados' => $updated,
-            'porcentaje_cruzado' => $totalBefore > 0 ? round(($updated / $totalBefore) * 100, 2) : 0,
+            'registros_procesados' => $updated,
+            'nombres_validos_agregados' => $withValidNames,
+            'registros_sin_nombres' => $withoutNames,
+            'porcentaje_con_nombres' => $totalBefore > 0 ? round(($withValidNames / $totalBefore) * 100, 2) : 0,
         ]);
     }
 
@@ -70,24 +81,104 @@ final class AddNamesToDettraFromBasactStep implements ProcessingStepInterface
      */
     private function addNamesToDettra(CollectionNoticeRun $run): int
     {
+        // Primero verificar si las columnas existen en BASACT
+        $columnsExist = DB::select("
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = 'data_source_basact'
+                AND column_name IN ('primer_nombre_trabajador', 'segundo_nombre_trabajador', 'primer_apellido_trabajador', 'segundo_apellido_trabajador')
+        ");
+
+        Log::info('Verificación de columnas en BASACT', [
+            'run_id' => $run->id,
+            'columnas_encontradas' => array_column($columnsExist, 'column_name'),
+            'total_columnas' => count($columnsExist),
+        ]);
+
+        if (count($columnsExist) === 0) {
+            Log::warning('Las columnas de nombres no existen en BASACT', [
+                'run_id' => $run->id,
+            ]);
+            return 0;
+        }
+
+        // Verificar muestra de datos en BASACT antes del UPDATE
+        $sampleData = DB::select("
+            SELECT
+                identificacion_trabajador,
+                primer_nombre_trabajador,
+                segundo_nombre_trabajador,
+                primer_apellido_trabajador,
+                segundo_apellido_trabajador,
+                NULLIF(TRIM(
+                    CONCAT_WS(' ',
+                        NULLIF(TRIM(primer_nombre_trabajador), ''),
+                        NULLIF(TRIM(segundo_nombre_trabajador), ''),
+                        NULLIF(TRIM(primer_apellido_trabajador), ''),
+                        NULLIF(TRIM(segundo_apellido_trabajador), '')
+                    )
+                ), '') as nombre_completo
+            FROM data_source_basact
+            WHERE run_id = ?
+            LIMIT 5
+        ", [$run->id]);
+
+        Log::info('Muestra de datos en BASACT', [
+            'run_id' => $run->id,
+            'sample' => $sampleData,
+        ]);
+
+        // Contar cuántos tienen al menos un campo de nombre no vacío
+        $withNames = DB::selectOne("
+            SELECT COUNT(*) as count
+            FROM data_source_basact
+            WHERE run_id = ?
+                AND (
+                    (primer_nombre_trabajador IS NOT NULL AND primer_nombre_trabajador != '')
+                    OR (segundo_nombre_trabajador IS NOT NULL AND segundo_nombre_trabajador != '')
+                    OR (primer_apellido_trabajador IS NOT NULL AND primer_apellido_trabajador != '')
+                    OR (segundo_apellido_trabajador IS NOT NULL AND segundo_apellido_trabajador != '')
+                )
+        ", [$run->id]);
+
+        Log::info('Análisis de nombres en BASACT', [
+            'run_id' => $run->id,
+            'registros_con_al_menos_un_nombre' => $withNames->count,
+        ]);
+
         // Usar CONCAT_WS para manejar NULLs automáticamente
         // CONCAT_WS ignora valores NULL y no requiere COALESCE
+        // NULLIF convierte cadenas vacías en NULL (cuando todos los campos son NULL/vacíos)
         $affectedRows = DB::update("
             UPDATE data_source_dettra AS dettra
-            SET nombres = TRIM(
+            SET nombres = NULLIF(TRIM(
                 CONCAT_WS(' ',
-                    basact.\"1_nombre_trabajador\",
-                    basact.\"2_nombre_trabajador\",
-                    basact.\"1_apellido_trabajador\",
-                    basact.\"2_apellido_trabajador\"
+                    NULLIF(TRIM(basact.primer_nombre_trabajador), ''),
+                    NULLIF(TRIM(basact.segundo_nombre_trabajador), ''),
+                    NULLIF(TRIM(basact.primer_apellido_trabajador), ''),
+                    NULLIF(TRIM(basact.segundo_apellido_trabajador), '')
                 )
-            )
+            ), '')
             FROM data_source_basact AS basact
             WHERE dettra.run_id = ?
                 AND basact.run_id = ?
-                AND dettra.nit = basact.identificacion_trabajador
+                AND TRIM(COALESCE(dettra.nit, '')) = TRIM(COALESCE(basact.identificacion_trabajador, ''))
+                AND TRIM(COALESCE(dettra.nit, '')) != ''
                 AND dettra.nombres IS NULL
         ", [$run->id, $run->id]);
+
+        // Verificar muestra después del UPDATE
+        $sampleAfter = DB::select("
+            SELECT nit, nombres
+            FROM data_source_dettra
+            WHERE run_id = ?
+            LIMIT 5
+        ", [$run->id]);
+
+        Log::info('Muestra de DETTRA después del UPDATE', [
+            'run_id' => $run->id,
+            'sample' => $sampleAfter,
+        ]);
 
         return $affectedRows;
     }

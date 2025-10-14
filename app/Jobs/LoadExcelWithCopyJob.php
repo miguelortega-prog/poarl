@@ -83,6 +83,16 @@ class LoadExcelWithCopyJob implements ShouldQueue
             return;
         }
 
+        // Verificar si el archivo ya fue importado completamente
+        if ($file->isCompleted()) {
+            Log::info('Archivo ya fue importado, omitiendo', [
+                'file_id' => $this->fileId,
+                'data_source' => $this->dataSourceCode,
+                'completed_at' => $file->import_completed_at,
+            ]);
+            return;
+        }
+
         $runId = $file->collection_notice_run_id;
         $tableName = self::TABLE_MAP[$this->dataSourceCode] ?? null;
 
@@ -90,10 +100,14 @@ class LoadExcelWithCopyJob implements ShouldQueue
             throw new \RuntimeException("Data source no soportado: {$this->dataSourceCode}");
         }
 
+        // Marcar archivo como en proceso
+        $file->markAsProcessing();
+
         Log::info('Iniciando importación Excel', [
             'data_source' => $this->dataSourceCode,
             'table' => $tableName,
             'run_id' => $runId,
+            'file_id' => $this->fileId,
         ]);
 
         $deleted = DB::table($tableName)->where('run_id', $runId)->delete();
@@ -146,12 +160,20 @@ class LoadExcelWithCopyJob implements ShouldQueue
                 $totalRowsImported += $result['rows'];
             }
 
+            // Marcar archivo como completado exitosamente
+            $file->markAsCompleted();
+
             Log::info('Importación Excel completada', [
                 'data_source' => $this->dataSourceCode,
                 'run_id' => $runId,
+                'file_id' => $this->fileId,
+                'total_rows' => $totalRowsImported,
             ]);
 
         } catch (Throwable $exception) {
+            // Marcar archivo como fallido
+            $file->markAsFailed($exception->getMessage());
+
             Log::error('Error en carga optimizada Excel → COPY', [
                 'file_id' => $this->fileId,
                 'run_id' => $runId,

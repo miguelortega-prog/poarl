@@ -116,6 +116,16 @@ final class LoadCsvDataSourcesJob implements ShouldQueue
             return;
         }
 
+        // Verificar si el archivo ya fue importado completamente
+        if ($file->isCompleted()) {
+            Log::info('Archivo CSV ya fue importado, omitiendo', [
+                'file_id' => $this->fileId,
+                'data_source' => $this->dataSourceCode,
+                'completed_at' => $file->import_completed_at,
+            ]);
+            return;
+        }
+
         $runId = $file->collection_notice_run_id;
         $tableName = self::TABLE_MAP[$this->dataSourceCode] ?? null;
 
@@ -123,10 +133,14 @@ final class LoadCsvDataSourcesJob implements ShouldQueue
             throw new RuntimeException("Data source no soportado: {$this->dataSourceCode}");
         }
 
+        // Marcar archivo como en proceso
+        $file->markAsProcessing();
+
         Log::info('Iniciando importación CSV resiliente', [
             'data_source' => $this->dataSourceCode,
             'table' => $tableName,
             'run_id' => $runId,
+            'file_id' => $this->fileId,
         ]);
 
         try {
@@ -175,12 +189,21 @@ final class LoadCsvDataSourcesJob implements ShouldQueue
                 true // hasHeader
             );
 
+            // Marcar archivo como completado exitosamente
+            $file->markAsCompleted();
+
             Log::info('Importación CSV resiliente completada', [
                 'data_source' => $this->dataSourceCode,
                 'run_id' => $runId,
+                'file_id' => $this->fileId,
+                'rows_imported' => $result['rows_imported'] ?? 0,
+                'rows_with_errors' => $result['rows_with_errors'] ?? 0,
             ]);
 
         } catch (Throwable $exception) {
+            // Marcar archivo como fallido
+            $file->markAsFailed($exception->getMessage());
+
             Log::error('Error en carga resiliente de archivo CSV', [
                 'job' => self::class,
                 'file_id' => $this->fileId,

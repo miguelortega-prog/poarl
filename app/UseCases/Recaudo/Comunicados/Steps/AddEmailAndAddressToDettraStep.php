@@ -84,7 +84,8 @@ final class AddEmailAndAddressToDettraStep implements ProcessingStepInterface
             FROM data_source_basact AS basact
             WHERE dettra.run_id = ?
                 AND basact.run_id = ?
-                AND dettra.nit = basact.identificacion_trabajador
+                AND TRIM(COALESCE(dettra.nit, '')) = TRIM(COALESCE(basact.identificacion_trabajador, ''))
+                AND TRIM(COALESCE(dettra.nit, '')) != ''
                 AND dettra.correo IS NULL
                 AND basact.correo_trabajador IS NOT NULL
                 AND basact.correo_trabajador != ''
@@ -116,7 +117,8 @@ final class AddEmailAndAddressToDettraStep implements ProcessingStepInterface
             FROM data_source_basact AS basact
             WHERE dettra.run_id = ?
                 AND basact.run_id = ?
-                AND dettra.nit = basact.identificacion_trabajador
+                AND TRIM(COALESCE(dettra.nit, '')) = TRIM(COALESCE(basact.identificacion_trabajador, ''))
+                AND TRIM(COALESCE(dettra.nit, '')) != ''
                 AND dettra.direccion IS NULL
                 AND basact.direccion_trabajador IS NOT NULL
                 AND basact.direccion_trabajador != ''

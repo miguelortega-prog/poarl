@@ -158,34 +158,56 @@ final class CreatePaglogIndexesStep implements ProcessingStepInterface
         ]);
 
         // Actualizar composite_key_dv usando CASE WHEN para mapear NITs
-        $caseStatements = [];
-        $bindings = [];
+        // IMPORTANTE: Procesar en lotes para evitar exceder límites de PostgreSQL
+        $batchSize = 5000;
+        $totalUpdated = 0;
+        $batches = array_chunk($nitWithDvMap, $batchSize, true);
 
-        foreach ($nitWithDvMap as $nitOriginal => $nitConDv) {
-            $caseStatements[] = "WHEN nit_empresa = ? THEN CONCAT(?, '_', periodo_pago)";
-            $bindings[] = $nitOriginal;
-            $bindings[] = $nitConDv;
+        Log::info('Iniciando actualización de composite_key_dv en lotes', [
+            'run_id' => $run->id,
+            'total_nits' => count($nitWithDvMap),
+            'batch_size' => $batchSize,
+            'total_batches' => count($batches),
+        ]);
+
+        foreach ($batches as $batchIndex => $batch) {
+            $caseStatements = [];
+            $bindings = [];
+
+            foreach ($batch as $nitOriginal => $nitConDv) {
+                $caseStatements[] = "WHEN nit_empresa = ? THEN ? || '_' || periodo_pago";
+                $bindings[] = $nitOriginal;
+                $bindings[] = $nitConDv;
+            }
+
+            if (empty($caseStatements)) {
+                continue;
+            }
+
+            $caseQuery = implode(' ', $caseStatements);
+            $bindings[] = $run->id;
+
+            $sql = "
+                UPDATE {$tableName}
+                SET composite_key_dv = CASE
+                    {$caseQuery}
+                    ELSE composite_key_dv
+                END
+                WHERE run_id = ?
+                    AND composite_key_dv IS NULL
+            ";
+
+            $affected = DB::update($sql, $bindings);
+            $totalUpdated += $affected;
+
+            Log::debug('Lote de composite_key_dv procesado', [
+                'run_id' => $run->id,
+                'batch' => $batchIndex + 1,
+                'total_batches' => count($batches),
+                'nits_in_batch' => count($batch),
+                'rows_updated' => $affected,
+            ]);
         }
-
-        if (empty($caseStatements)) {
-            Log::warning('No se generaron case statements para composite_key_dv', ['run_id' => $run->id]);
-            return;
-        }
-
-        $caseQuery = implode(' ', $caseStatements);
-        $bindings[] = $run->id;
-
-        $sql = "
-            UPDATE {$tableName}
-            SET composite_key_dv = CASE
-                {$caseQuery}
-                ELSE NULL
-            END
-            WHERE run_id = ?
-                AND composite_key_dv IS NULL
-        ";
-
-        DB::update($sql, $bindings);
 
         $updatedWithDv = DB::table($tableName)
             ->where('run_id', $run->id)
@@ -195,6 +217,7 @@ final class CreatePaglogIndexesStep implements ProcessingStepInterface
         Log::info('Composite keys (con DV) generadas en PAGLOG', [
             'run_id' => $run->id,
             'registros_actualizados' => $updatedWithDv,
+            'total_rows_affected' => $totalUpdated,
         ]);
     }
 

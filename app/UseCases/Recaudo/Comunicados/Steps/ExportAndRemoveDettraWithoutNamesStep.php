@@ -46,7 +46,13 @@ final class ExportAndRemoveDettraWithoutNamesStep implements ProcessingStepInter
     {
         Log::info('Exportando y eliminando registros sin nombres de DETTRA', ['run_id' => $run->id]);
 
-        // Contar registros sin nombres
+        // Contar registros totales y sin nombres
+        $totalDettra = (int) DB::selectOne("
+            SELECT COUNT(*) as count
+            FROM data_source_dettra
+            WHERE run_id = ?
+        ", [$run->id])->count;
+
         $totalSinNombres = (int) DB::selectOne("
             SELECT COUNT(*) as count
             FROM data_source_dettra
@@ -59,9 +65,45 @@ final class ExportAndRemoveDettraWithoutNamesStep implements ProcessingStepInter
             return;
         }
 
+        // VALIDACIÓN CRÍTICA: Si todos los registros no tienen nombres, abortar el proceso
+        // porque DETTRA es la tabla principal para el procesador de Independientes
+        if ($totalSinNombres === $totalDettra) {
+            $errorMessage = sprintf(
+                'PROCESO ABORTADO: Todos los %d registros de DETTRA no tienen nombres. ' .
+                'Esto indica un problema en el cruce con BASACT. Revise: ' .
+                '1) Que BASACT tenga datos cargados, ' .
+                '2) Que los NITs coincidan entre DETTRA y BASACT, ' .
+                '3) Que los campos de nombre en BASACT tengan datos válidos.',
+                $totalDettra
+            );
+
+            Log::error($errorMessage, [
+                'run_id' => $run->id,
+                'total_dettra' => $totalDettra,
+                'total_sin_nombres' => $totalSinNombres,
+            ]);
+
+            // Actualizar run a estado failed
+            $run->update([
+                'status' => 'failed',
+                'failed_at' => now(),
+                'errors' => [
+                    'step' => $this->getName(),
+                    'error' => 'Todos los registros sin nombres - Proceso abortado',
+                    'details' => $errorMessage,
+                    'total_registros' => $totalDettra,
+                    'sin_nombres' => $totalSinNombres,
+                ],
+            ]);
+
+            throw new \Exception($errorMessage);
+        }
+
         Log::info('Registros sin nombres encontrados', [
             'run_id' => $run->id,
+            'total_dettra' => $totalDettra,
             'total_sin_nombres' => $totalSinNombres,
+            'porcentaje_sin_nombres' => round(($totalSinNombres / $totalDettra) * 100, 2),
         ]);
 
         // Agregar registros sin nombres al archivo de excluidos

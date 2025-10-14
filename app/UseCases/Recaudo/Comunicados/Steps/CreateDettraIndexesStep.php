@@ -122,9 +122,10 @@ final class CreateDettraIndexesStep implements ProcessingStepInterface
         }
 
         // Generar composite_key = NIT + '_' + periodo
+        // Usamos operador || con CAST explícito para evitar problemas de tipos de datos en PostgreSQL
         DB::statement("
             UPDATE {$tableName}
-            SET composite_key = CONCAT(nit, '_', ?)
+            SET composite_key = nit || '_' || CAST(? AS VARCHAR)
             WHERE run_id = ?
                 AND composite_key IS NULL
         ", [$period, $run->id]);
