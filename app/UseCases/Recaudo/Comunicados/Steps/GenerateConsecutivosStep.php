@@ -91,6 +91,7 @@ final class GenerateConsecutivosStep implements ProcessingStepInterface
     {
         // Usar una subconsulta con ROW_NUMBER() para generar seriales
         // IMPORTANTE: ORDER BY id garantiza que los seriales sean reproducibles
+        // Nota: SERIAL_LENGTH se pasa directo porque LPAD espera un INTEGER literal
         $affectedRows = DB::update("
             UPDATE data_source_dettra AS dettra
             SET consecutivo = subquery.consecutivo
@@ -98,15 +99,15 @@ final class GenerateConsecutivosStep implements ProcessingStepInterface
                 SELECT
                     id,
                     CONCAT(
-                        ?,
+                        ?::text,
                         '-',
                         COALESCE(tipo_doc, 'NN'),
                         '-',
                         COALESCE(nit, '0'),
                         '-',
-                        ?,
+                        ?::text,
                         '-',
-                        LPAD(ROW_NUMBER() OVER (ORDER BY id)::text, ?, '0')
+                        LPAD(ROW_NUMBER() OVER (ORDER BY id)::text, " . self::SERIAL_LENGTH . ", '0')
                     ) as consecutivo
                 FROM data_source_dettra
                 WHERE run_id = ?
@@ -114,7 +115,7 @@ final class GenerateConsecutivosStep implements ProcessingStepInterface
             WHERE dettra.id = subquery.id
                 AND dettra.run_id = ?
                 AND dettra.consecutivo IS NULL
-        ", [self::PREFIX, $fecha, self::SERIAL_LENGTH, $run->id, $run->id]);
+        ", [self::PREFIX, $fecha, $run->id, $run->id]);
 
         return $affectedRows;
     }

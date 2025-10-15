@@ -237,9 +237,11 @@ class LoadExcelWithCopyJob implements ShouldQueue
         $input = fopen($csvPath, 'r');
         $output = fopen($outputPath, 'w');
 
-        // Leer header del CSV y splitear por delimitador
+        // Leer header del CSV usando str_getcsv para manejar comillas correctamente
         $headerLine = fgets($input);
-        $csvHeaders = explode($delimiter, trim($headerLine));
+        $csvHeaders = str_getcsv(trim($headerLine), $delimiter, '"', '\\');
+        // Trim cada header para eliminar espacios que puedan venir del Excel
+        $csvHeaders = array_map('trim', $csvHeaders);
 
         // Normalizar headers a minúsculas para comparación case-insensitive
         $csvHeadersLower = array_map('strtolower', $csvHeaders);
@@ -253,8 +255,9 @@ class LoadExcelWithCopyJob implements ShouldQueue
             $columnMapping[$expectedCol] = $index !== false ? $index : null;
         }
 
-        // Escribir header normalizado usando fputcsv para manejar comillas correctamente
-        fputcsv($output, $expectedColumns, $delimiter, '"', '\\');
+        // Escribir header normalizado usando fputcsv
+        // Usamos chr(0) como escape para seguir RFC 4180 (solo duplicar comillas, sin backslash)
+        fputcsv($output, $expectedColumns, $delimiter, '"', chr(0));
 
         // Procesar cada línea de datos
         while (($line = fgets($input)) !== false) {
@@ -283,8 +286,8 @@ class LoadExcelWithCopyJob implements ShouldQueue
                 }
             }
 
-            // Usar fputcsv en lugar de implode para manejar correctamente valores con delimitador
-            fputcsv($output, $normalizedRow, $delimiter, '"', '\\');
+            // Usar fputcsv - chr(0) para RFC 4180 (duplicar comillas, no backslash)
+            fputcsv($output, $normalizedRow, $delimiter, '"', chr(0));
         }
 
         fclose($input);
@@ -295,6 +298,7 @@ class LoadExcelWithCopyJob implements ShouldQueue
 
     /**
      * Agrega run_id al inicio de cada línea del CSV.
+     * Usa fgetcsv() para manejar correctamente campos con saltos de línea.
      */
     private function addRunIdToCSV(string $csvPath, int $runId): string
     {
@@ -303,14 +307,17 @@ class LoadExcelWithCopyJob implements ShouldQueue
         $output = fopen($outputPath, 'w');
 
         $isFirstLine = true;
-        while (($line = fgets($input)) !== false) {
+        // Leer con el mismo estándar que usamos para escribir
+        while (($row = fgetcsv($input, 0, ';', '"', chr(0))) !== false) {
             if ($isFirstLine) {
                 // Agregar "run_id" al header
-                fwrite($output, 'run_id;' . $line);
+                array_unshift($row, 'run_id');
+                fputcsv($output, $row, ';', '"', chr(0));
                 $isFirstLine = false;
             } else {
-                // Agregar el run_id al inicio de cada línea
-                fwrite($output, $runId . ';' . $line);
+                // Agregar el run_id al inicio de cada fila
+                array_unshift($row, $runId);
+                fputcsv($output, $row, ';', '"', chr(0));
             }
         }
 

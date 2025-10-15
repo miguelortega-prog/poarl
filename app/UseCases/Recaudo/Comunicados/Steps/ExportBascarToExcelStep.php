@@ -150,7 +150,7 @@ final class ExportBascarToExcelStep implements ProcessingStepInterface
                 b.num_poliza as contrato,
                 SUBSTRING(b.periodo FROM 1 FOR 4) as anio1,
                 SUBSTRING(b.periodo FROM 5 FOR 2) as mes1,
-                b.valor_total_fact as valor1,
+                ROUND(b.valor_total_fact::numeric, 0) as valor1,
                 b.cantidad_trabajadores as afiliados1,
                 b.consecutivo,
                 b.ident_asegurado as tip_ind,

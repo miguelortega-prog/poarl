@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"time"
 
 	"github.com/xuri/excelize/v2"
@@ -28,6 +29,38 @@ type Result struct {
 	TotalRows int           `json:"total_rows"`
 	TotalTime int           `json:"total_time_ms"`
 	Error     string        `json:"error,omitempty"`
+}
+
+// fixTwoDigitYearDates convierte fechas con año de 2 dígitos a 4 dígitos
+// Usa regex para detectar patrones de fecha y corregirlos
+// Soporta formatos: DD-MM-YY, DD/MM/YY, D-M-YY, D/M/YY
+func fixTwoDigitYearDates(row []string) []string {
+	result := make([]string, len(row))
+
+	// Regex para detectar fechas con año de 2 dígitos
+	// Captura: (día)-(separador)-(mes)-(separador)-(año de 2 dígitos)
+	// Acepta cualquier separador (- o /)
+	datePattern := regexp.MustCompile(`^(\d{1,2})([-/])(\d{1,2})([-/])(\d{2})$`)
+
+	for i, value := range row {
+		matches := datePattern.FindStringSubmatch(value)
+		if len(matches) == 6 {
+			day := matches[1]
+			month := matches[3]
+			year := matches[5]
+
+			// Convertir año de 2 dígitos a 4 dígitos
+			// Asumimos que 00-99 son 2000-2099
+			fullYear := "20" + year
+
+			// Reconstruir fecha con año de 4 dígitos y slash como separador
+			result[i] = day + "/" + month + "/" + fullYear
+		} else {
+			result[i] = value
+		}
+	}
+
+	return result
 }
 
 func main() {
@@ -91,7 +124,6 @@ func main() {
 		}
 
 		rowCount := 0
-		isFirstRow := true
 
 		for rows.Next() {
 			row, err := rows.Columns()
@@ -99,11 +131,15 @@ func main() {
 				continue
 			}
 
-			// Agregar columna sheet_name al header (primera fila)
-			if isFirstRow {
+			rowCount++
+
+			// Para todas las filas (incluyendo header), agregar columna sheet_name
+			if rowCount == 1 {
+				// Primera fila es el header
 				row = append(row, "sheet_name")
-				isFirstRow = false
 			} else {
+				// Para filas de datos, corregir fechas con año de 2 dígitos
+				row = fixTwoDigitYearDates(row)
 				// Agregar valor de sheet_name a las filas de datos
 				row = append(row, sheetName)
 			}
@@ -115,8 +151,6 @@ func main() {
 				outputJSON(result)
 				os.Exit(1)
 			}
-
-			rowCount++
 		}
 
 		if err := rows.Close(); err != nil {

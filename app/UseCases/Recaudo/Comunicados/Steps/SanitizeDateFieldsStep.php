@@ -16,8 +16,10 @@ use Illuminate\Support\Facades\Log;
  * y los convierte al formato estándar ISO 8601 (YYYY-MM-DD).
  *
  * Formatos soportados:
- * - DD/MM/YYYY → YYYY-MM-DD (formato europeo/latinoamericano)
- * - MM/DD/YYYY → YYYY-MM-DD (formato estadounidense)
+ * - DD/MM/YYYY → YYYY-MM-DD (formato europeo/latinoamericano con 4 dígitos año)
+ * - DD/MM/YY → YYYY-MM-DD (formato europeo/latinoamericano con 2 dígitos año)
+ * - D/M/YYYY → YYYY-MM-DD (día y mes sin padding, año 4 dígitos)
+ * - D/M/YY → YYYY-MM-DD (día y mes sin padding, año 2 dígitos)
  * - DD-MM-YYYY → YYYY-MM-DD (formato con guiones)
  * - YYYY-MM-DD → Ya está OK (no requiere conversión)
  * - Números seriales de Excel → YYYY-MM-DD (días desde 1900-01-01)
@@ -117,6 +119,15 @@ final class SanitizeDateFieldsStep implements ProcessingStepInterface
             -- Si es D/M/YYYY o DD/M/YYYY (día y mes sin padding)
             WHEN {$column} ~ '^\d{1,2}/\d{1,2}/\d{4}$' THEN
                 TO_CHAR(TO_DATE({$column}, 'DD/MM/YYYY'), 'YYYY-MM-DD')
+
+            -- Si es DD/MM/YY (patrón: 2 dígitos/2 dígitos/2 dígitos - año con 2 dígitos)
+            -- Interpreta YY como 20YY si YY >= 00 y YY <= 99
+            WHEN {$column} ~ '^\d{2}/\d{2}/\d{2}$' THEN
+                TO_CHAR(TO_DATE({$column}, 'DD/MM/YY'), 'YYYY-MM-DD')
+
+            -- Si es D/M/YY o DD/M/YY (día y mes sin padding, año con 2 dígitos)
+            WHEN {$column} ~ '^\d{1,2}/\d{1,2}/\d{2}$' THEN
+                TO_CHAR(TO_DATE({$column}, 'DD/MM/YY'), 'YYYY-MM-DD')
 
             -- Si es número serial de Excel (solo dígitos, entre 1 y 50000)
             -- Excel cuenta días desde 1900-01-01 (pero tiene bug con 1900 como bisiesto)

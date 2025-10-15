@@ -43,10 +43,6 @@ final class GenerateBascarCompositeKeyStep implements ProcessingStepInterface
             UPDATE {$tableName}
             SET composite_key = TRIM(num_tomador) || periodo
             WHERE run_id = ?
-                AND num_tomador IS NOT NULL
-                AND num_tomador != ''
-                AND periodo IS NOT NULL
-                AND periodo != ''
         ", [$run->id]);
 
         // Validar que se generaron llaves

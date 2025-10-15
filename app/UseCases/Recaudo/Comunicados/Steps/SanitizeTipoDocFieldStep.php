@@ -33,6 +33,8 @@ final class SanitizeTipoDocFieldStep implements ProcessingStepInterface
         'E' => 'CE',  // Cédula de Extranjería
         'F' => 'PE',  // Permiso Especial
         'T' => 'TI',  // Tarjeta de Identidad
+        'G' => 'PT',  // Permiso de trabajo
+        'P' => 'PA',  // Pasaporte
     ];
 
     public function getName(): string

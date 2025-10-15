@@ -73,6 +73,7 @@ final class AddEmailAndAddressToDettraStep implements ProcessingStepInterface
      * - Formato de email válido (regex)
      * - NO @segurosbolivar.com
      * - NO @segurosbolivar.com.co
+     * - NO estar en la lista negra (email_blacklist)
      *
      * @return int Cantidad de registros actualizados
      */
@@ -92,6 +93,7 @@ final class AddEmailAndAddressToDettraStep implements ProcessingStepInterface
                 AND basact.correo_trabajador ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'
                 AND LOWER(basact.correo_trabajador) NOT LIKE '%@segurosbolivar.com'
                 AND LOWER(basact.correo_trabajador) NOT LIKE '%@segurosbolivar.com.co'
+                AND LOWER(basact.correo_trabajador) NOT IN (SELECT LOWER(email) FROM email_blacklist)
         ", [$run->id, $run->id]);
 
         return $affectedRows;

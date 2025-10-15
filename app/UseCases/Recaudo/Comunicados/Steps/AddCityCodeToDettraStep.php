@@ -16,7 +16,7 @@ use Illuminate\Support\Facades\Log;
  * concatenando el código de departamento y el código de ciudad.
  *
  * Construcción del código_ciudad:
- * - cod_depto_empresa: Formateado a 2 dígitos (LPAD con ceros)
+ * - cod_dpto_empresa: Formateado a 2 dígitos (LPAD con ceros)
  * - cod_ciudad_empresa: Formateado a 3 dígitos (LPAD con ceros)
  * - Resultado: código DIVIPOLA de 5 dígitos
  * - Ejemplo: Departamento "5" + Ciudad "1" → "05001" (Medellín, Antioquia)
@@ -66,17 +66,17 @@ final class AddCityCodeToDettraStep implements ProcessingStepInterface
     private function generateCityCodes(CollectionNoticeRun $run): int
     {
         // PostgreSQL usa LPAD(string, length, fill_char) para rellenar con ceros a la izquierda
-        // Concatenamos: cod_depto_empresa (2 dígitos) + cod_ciudad_empresa (3 dígitos)
+        // Concatenamos: cod_dpto_empresa (2 dígitos) + cod_ciudad_empresa (3 dígitos)
         $affectedRows = DB::update("
             UPDATE data_source_dettra
             SET codigo_ciudad = CONCAT(
-                LPAD(COALESCE(cod_depto_empresa, ''), 2, '0'),
+                LPAD(COALESCE(cod_dpto_empresa, ''), 2, '0'),
                 LPAD(COALESCE(cod_ciudad_empresa, ''), 3, '0')
             )
             WHERE run_id = ?
                 AND codigo_ciudad IS NULL
                 AND (
-                    cod_depto_empresa IS NOT NULL
+                    cod_dpto_empresa IS NOT NULL
                     OR cod_ciudad_empresa IS NOT NULL
                 )
         ", [$run->id]);

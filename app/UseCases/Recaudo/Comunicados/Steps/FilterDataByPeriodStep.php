@@ -58,7 +58,7 @@ final class FilterDataByPeriodStep implements ProcessingStepInterface
 
     /**
      * Filtra tabla BASCAR por periodo:
-     * 1. Extrae periodo de fecha_inicio_vig (DD/MM/YYYY o YYYY-MM-DD → YYYYMM)
+     * 1. Extrae periodo de fecha_inicio_vig (DD/MM/YYYY, DD/MM/YY, o YYYY-MM-DD → YYYYMM)
      * 2. Elimina registros que no correspondan al periodo del run
      *
      * Nota: La columna 'periodo' ya fue creada por CreateBascarIndexesStep (paso 2)
@@ -69,8 +69,9 @@ final class FilterDataByPeriodStep implements ProcessingStepInterface
         $tableName = 'data_source_bascar';
 
         // Extraer periodo de fecha_inicio_vig
-        // Maneja dos formatos:
-        // - DD/MM/YYYY (formato original del CSV)
+        // Maneja tres formatos:
+        // - DD/MM/YYYY (formato original del CSV con año de 4 dígitos)
+        // - DD/MM/YY (formato original del CSV con año de 2 dígitos)
         // - YYYY-MM-DD (formato sanitizado por SanitizeDateFieldsStep)
         DB::statement("
             UPDATE {$tableName}
@@ -81,10 +82,17 @@ final class FilterDataByPeriodStep implements ProcessingStepInterface
                         SUBSTRING(fecha_inicio_vig, 1, 4),
                         SUBSTRING(fecha_inicio_vig, 6, 2)
                     )
-                -- Si es formato DD/MM/YYYY (original): extraer YYYYMM
+                -- Si es formato DD/MM/YYYY (original con 4 dígitos de año): extraer YYYYMM
                 WHEN fecha_inicio_vig ~ '^[0-9]{1,2}/[0-9]{1,2}/[0-9]{4}$' THEN
                     CONCAT(
                         SPLIT_PART(fecha_inicio_vig, '/', 3),
+                        LPAD(SPLIT_PART(fecha_inicio_vig, '/', 2), 2, '0')
+                    )
+                -- Si es formato DD/MM/YY (original con 2 dígitos de año): extraer YYYYMM
+                -- Interpreta YY como 20YY (ejemplo: 25 → 2025)
+                WHEN fecha_inicio_vig ~ '^[0-9]{1,2}/[0-9]{1,2}/[0-9]{2}$' THEN
+                    CONCAT(
+                        '20' || SPLIT_PART(fecha_inicio_vig, '/', 3),
                         LPAD(SPLIT_PART(fecha_inicio_vig, '/', 2), 2, '0')
                     )
                 ELSE NULL

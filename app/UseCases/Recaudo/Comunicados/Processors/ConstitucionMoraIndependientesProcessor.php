@@ -8,7 +8,7 @@ use App\Models\CollectionNoticeRun;
 use App\Services\Recaudo\Comunicados\BaseCollectionNoticeProcessor;
 use App\Services\Recaudo\DataSourceTableManager;
 use App\UseCases\Recaudo\Comunicados\Steps\AddCityCodeToDettraStep;
-use App\UseCases\Recaudo\Comunicados\Steps\AddEmailAndAddressFromPagaplaStep;
+use App\UseCases\Recaudo\Comunicados\Steps\AddEmailAndAddressFromPagplaStep;
 use App\UseCases\Recaudo\Comunicados\Steps\AddEmailAndAddressToDettraStep;
 use App\UseCases\Recaudo\Comunicados\Steps\AddNamesToDettraFromBasactStep;
 use App\UseCases\Recaudo\Comunicados\Steps\CleanupDataSourcesStep;
@@ -85,7 +85,7 @@ final class ConstitucionMoraIndependientesProcessor extends BaseCollectionNotice
         private readonly ExportAndRemoveDettraWithoutNamesStep $exportAndRemoveDettraWithoutNamesStep,
         private readonly AddCityCodeToDettraStep $addCityCodeToDettraStep,
         private readonly AddEmailAndAddressToDettraStep $addEmailAndAddressToDettraStep,
-        private readonly AddEmailAndAddressFromPagaplaStep $addEmailAndAddressFromPagaplaStep,
+        private readonly AddEmailAndAddressFromPagplaStep $addEmailAndAddressFromPagplaStep,
         private readonly ExportAndRemoveDettraWithoutContactDataStep $exportAndRemoveDettraWithoutContactDataStep,
         private readonly DefineTipoDeEnvioDettraStep $defineTipoDeEnvioDettraStep,
         private readonly SanitizeTipoDocFieldStep $sanitizeTipoDocFieldStep,
@@ -252,12 +252,12 @@ final class ConstitucionMoraIndependientesProcessor extends BaseCollectionNotice
             // Excluye correos de @segurosbolivar.com y direcciones inválidas
             $this->addEmailAndAddressToDettraStep,
 
-            // Paso 15: Agregar correo y dirección desde PAGAPL (fallback)
+            // Paso 15: Agregar correo y dirección desde PAGPLA (fallback)
             // Para registros que quedaron sin correo o dirección en BASACT
-            // Cruza DETTRA.nit con PAGAPL.identificacion_aportante
-            // Busca el PRIMER registro de PAGAPL (cualquier periodo) que cumpla validaciones
+            // Cruza DETTRA.nit con PAGPLA.identificacion_aportante
+            // Busca el PRIMER registro de PAGPLA (cualquier periodo) que cumpla validaciones
             // Si encuentra dirección válida, también actualiza codigo_ciudad (DIVIPOLA)
-            $this->addEmailAndAddressFromPagaplaStep,
+            $this->addEmailAndAddressFromPagplaStep,
 
             // Paso 16: Exportar y eliminar registros sin datos de contacto
             // Identifica registros con correo IS NULL AND direccion IS NULL

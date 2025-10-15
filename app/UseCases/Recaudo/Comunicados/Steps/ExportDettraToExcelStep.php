@@ -28,6 +28,8 @@ use PhpOffice\PhpSpreadsheet\Writer\Xls;
  * - Riesgo 1: 0.55%
  * - Riesgo 2: 1.044%
  * - Riesgo 3: 2.44%
+ * - Riesgo 4: 4.35%
+ * - Riesgo 5: 6.96%
  *
  * Nombre: Constitucion_en_mora_independientes_{{periodo}}.xls
  */
@@ -40,6 +42,8 @@ final class ExportDettraToExcelStep implements ProcessingStepInterface
         '1' => 0.0055,   // 0.55%
         '2' => 0.01044,  // 1.044%
         '3' => 0.0244,   // 2.44%
+        '4' => 0.0435,   // 4.35%
+        '5' => 0.0696,   // 6.96%
     ];
 
     public function __construct(
@@ -160,9 +164,11 @@ final class ExportDettraToExcelStep implements ProcessingStepInterface
                 ? as anio1,
                 ? as mes1,
                 CASE
-                    WHEN d.riesgo = '1' THEN ROUND(CAST(d.salario AS NUMERIC) * ?, 2)
-                    WHEN d.riesgo = '2' THEN ROUND(CAST(d.salario AS NUMERIC) * ?, 2)
-                    WHEN d.riesgo = '3' THEN ROUND(CAST(d.salario AS NUMERIC) * ?, 2)
+                    WHEN d.riesgo = '1' THEN ROUND(CAST(d.salario AS NUMERIC) * ?, 0)
+                    WHEN d.riesgo = '2' THEN ROUND(CAST(d.salario AS NUMERIC) * ?, 0)
+                    WHEN d.riesgo = '3' THEN ROUND(CAST(d.salario AS NUMERIC) * ?, 0)
+                    WHEN d.riesgo = '4' THEN ROUND(CAST(d.salario AS NUMERIC) * ?, 0)
+                    WHEN d.riesgo = '5' THEN ROUND(CAST(d.salario AS NUMERIC) * ?, 0)
                     ELSE 0
                 END as valor1,
                 1 as afiliados1,
@@ -180,6 +186,8 @@ final class ExportDettraToExcelStep implements ProcessingStepInterface
             self::TASA_RIESGO['1'],
             self::TASA_RIESGO['2'],
             self::TASA_RIESGO['3'],
+            self::TASA_RIESGO['4'],
+            self::TASA_RIESGO['5'],
             $run->id,
             $limit,
             $offset,
@@ -223,6 +231,8 @@ final class ExportDettraToExcelStep implements ProcessingStepInterface
      * - 1 → I
      * - 2 → II
      * - 3 → III
+     * - 4 → IV
+     * - 5 → V
      */
     private function generateSheet2(Spreadsheet $spreadsheet, CollectionNoticeRun $run, int $fileIndex): void
     {
@@ -270,14 +280,18 @@ final class ExportDettraToExcelStep implements ProcessingStepInterface
                     WHEN d.riesgo = '1' THEN 'I'
                     WHEN d.riesgo = '2' THEN 'II'
                     WHEN d.riesgo = '3' THEN 'III'
+                    WHEN d.riesgo = '4' THEN 'IV'
+                    WHEN d.riesgo = '5' THEN 'V'
                     ELSE d.riesgo
                 END as cls_rict,
                 REPLACE(COALESCE(d.fecha_ini_cobert, ''), '-', '') as fch_inv,
                 d.num_poli as poliza,
                 CASE
-                    WHEN d.riesgo = '1' THEN ROUND(CAST(d.salario AS NUMERIC) * ?, 2)
-                    WHEN d.riesgo = '2' THEN ROUND(CAST(d.salario AS NUMERIC) * ?, 2)
-                    WHEN d.riesgo = '3' THEN ROUND(CAST(d.salario AS NUMERIC) * ?, 2)
+                    WHEN d.riesgo = '1' THEN ROUND(CAST(d.salario AS NUMERIC) * ?, 0)
+                    WHEN d.riesgo = '2' THEN ROUND(CAST(d.salario AS NUMERIC) * ?, 0)
+                    WHEN d.riesgo = '3' THEN ROUND(CAST(d.salario AS NUMERIC) * ?, 0)
+                    WHEN d.riesgo = '4' THEN ROUND(CAST(d.salario AS NUMERIC) * ?, 0)
+                    WHEN d.riesgo = '5' THEN ROUND(CAST(d.salario AS NUMERIC) * ?, 0)
                     ELSE 0
                 END as valor,
                 d.tipo_cotizante as tpo_cot,
@@ -293,6 +307,8 @@ final class ExportDettraToExcelStep implements ProcessingStepInterface
             self::TASA_RIESGO['1'],
             self::TASA_RIESGO['2'],
             self::TASA_RIESGO['3'],
+            self::TASA_RIESGO['4'],
+            self::TASA_RIESGO['5'],
             $run->id,
             $limit,
             $offset,

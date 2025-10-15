@@ -19,12 +19,16 @@ use Illuminate\Support\Facades\Log;
  * 1. Identificar registros con CIU_TOM que NO cumplen patrón numérico
  * 2. Buscar esos valores en city_depto.name_city
  * 3. Si hay coincidencia ÚNICA → actualizar CIU_TOM con CONCAT(depto_code, city_code)
- * 4. Si hay múltiples coincidencias → NO actualizar (ambiguo)
- * 5. Si no hay coincidencias → dejar como está
+ * 4. Si hay múltiples coincidencias → dejar CIU_TOM vacío (ambiguo)
+ * 5. Si no hay coincidencias → dejar CIU_TOM vacío (no se puede resolver)
  *
- * Ejemplo:
+ * Ejemplos:
  * - CIU_TOM = "MEDELLIN" → Buscar en city_depto → Encontrar única coincidencia
  *   → Actualizar CIU_TOM = "05001"
+ * - CIU_TOM = "SAN JUAN" → Buscar en city_depto → Múltiples coincidencias
+ *   → Actualizar CIU_TOM = '' (vacío)
+ * - CIU_TOM = "CIUDAD INEXISTENTE" → Buscar en city_depto → Sin coincidencias
+ *   → Actualizar CIU_TOM = '' (vacío)
  */
 final class SanitizeCiuTomStep implements ProcessingStepInterface
 {
@@ -79,7 +83,9 @@ final class SanitizeCiuTomStep implements ProcessingStepInterface
     /**
      * Procesa un valor de CIU_TOM inválido.
      *
-     * Busca en city_depto por name_city y actualiza si hay coincidencia única.
+     * Busca en city_depto por name_city y actualiza según el resultado:
+     * - Coincidencia única: actualiza con el código DIVIPOLA
+     * - Sin coincidencias o múltiples: pone el campo vacío
      *
      * @return array{status: string, code?: string, matches?: int}
      */
@@ -93,19 +99,33 @@ final class SanitizeCiuTomStep implements ProcessingStepInterface
 
         $matchCount = $matches->count();
 
-        // Caso 1: No hay coincidencias
+        // Caso 1: No hay coincidencias → Dejar vacío
         if ($matchCount === 0) {
+            DB::update("
+                UPDATE data_source_bascar
+                SET ciu_tom = ''
+                WHERE run_id = ?
+                    AND UPPER(TRIM(ciu_tom)) = ?
+            ", [$run->id, $ciuTomValue]);
+
             return ['status' => 'not_found'];
         }
 
-        // Caso 2: Múltiples coincidencias (ambiguo)
+        // Caso 2: Múltiples coincidencias (ambiguo) → Dejar vacío
         if ($matchCount > 1) {
+            DB::update("
+                UPDATE data_source_bascar
+                SET ciu_tom = ''
+                WHERE run_id = ?
+                    AND UPPER(TRIM(ciu_tom)) = ?
+            ", [$run->id, $ciuTomValue]);
+
             $cities = $matches->map(fn($m) => "{$m->name_city} ({$m->name_depto})")->toArray();
 
             return ['status' => 'ambiguous', 'matches' => $matchCount];
         }
 
-        // Caso 3: Coincidencia única → Actualizar
+        // Caso 3: Coincidencia única → Actualizar con código DIVIPOLA
         $city = $matches->first();
         $newCode = $city->depto_code . $city->city_code;
 
