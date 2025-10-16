@@ -11,7 +11,7 @@
                         type="button"
                         x-data="{}"
                         x-on:click.prevent="Livewire.dispatch('openCreateRunModal')"
-                        class="col-span-12 desktop:col-span-3 inline-flex w-full items-center justify-center gap-2 rounded-3xl bg-secondary-900 px-5 py-3 text-button font-semibold text-primary transition hover:bg-secondary-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 focus:ring-offset-white dark:focus:ring-offset-gray-900 desktop:w-auto desktop:justify-self-end"
+                        class="col-span-12 desktop:col-span-3 inline-flex w-full items-center justify-center gap-2 rounded-3xl bg-secondary-900 px-5 py-3 text-primary-900 font-semibold text-primary transition hover:bg-secondary-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 focus:ring-offset-white dark:focus:ring-offset-gray-900 desktop:w-auto desktop:justify-self-end"
                     >
                         <i class="fa-solid fa-plus"></i>
                         <span>{{ __('Nuevo Comunicado') }}</span>
@@ -120,8 +120,9 @@
                         </div>
                     </form>
 
-                    <div class="grid grid-cols-7 gap-4 rounded-2xl bg-gray-100 px-6 py-3 text-label font-semibold uppercase tracking-wide text-gray-700 dark:bg-gray-900/60 dark:text-gray-200">
+                    <div class="grid grid-cols-8 gap-4 rounded-2xl bg-gray-100 px-6 py-3 text-label font-semibold uppercase tracking-wide text-gray-700 dark:bg-gray-900/60 dark:text-gray-200">
                         <span>{{ __('Id Comunicado') }}</span>
+                        <span>{{ __('Tipo De Comunicado') }}</span>
                         <span>{{ __('Periodo') }}</span>
                         <span>{{ __('Fecha Programación') }}</span>
                         <span>{{ __('Usuario Programación') }}</span>
@@ -140,7 +141,7 @@
                             ], true);
                         @endphp
                         <div x-data="{ openRunDetails: false, openResultFiles: false, openErrors: false }">
-                        <div class="grid grid-cols-7 items-center gap-4 rounded-2xl border border-gray-200 px-6 py-4 text-body text-gray-700 transition dark:border-gray-700 dark:text-gray-200">
+                        <div class="grid grid-cols-8 items-center gap-4 rounded-2xl border border-gray-200 px-6 py-4 text-body text-gray-700 transition dark:border-gray-700 dark:text-gray-200">
                             <button
                                 type="button"
                                 @click="openRunDetails = true"
@@ -148,6 +149,9 @@
                             >
                                 {{ $run->id }}
                             </button>
+                            <span class="text-sm">
+                                {{ $run->type?->name ?? __('N/D') }}
+                            </span>
                             <span class="text-sm">
                                 {{ $run->period === '*' ? __('Todos') : ($run->period ?? __('N/D')) }}
                             </span>

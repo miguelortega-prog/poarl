@@ -19,10 +19,12 @@ use Illuminate\Support\Facades\Log;
  *    - Se procesan todos los registros
  *
  * 2. Si periodo = YYYYMM (ej: "202508"):
- *    - En BASCAR: Crea columna 'periodo' extrayendo de fecha_inicio_vig (DD/MM/YYYY → YYYYMM)
+ *    - En BASCAR: Extrae periodo de fecha_inicio_vig (DD/MM/YYYY → YYYYMM)
  *    - En BASCAR: Elimina registros donde periodo != periodo_run
  *    - En PAGAPL: Filtra por sheet_name que contenga el año (YYYY) del periodo
  *    - En PAGAPL: Elimina hojas donde sheet_name no contenga el año
+ *
+ * Nota: La columna 'periodo' ya fue creada por CreateBascarIndexesStep (paso 2)
  */
 final class FilterDataByPeriodStep implements ProcessingStepInterface
 {
@@ -33,19 +35,19 @@ final class FilterDataByPeriodStep implements ProcessingStepInterface
 
     public function execute(CollectionNoticeRun $run): void
     {
-        $startTime = microtime(true);
-
-        Log::info('🔍 Iniciando filtrado de datos por periodo', [
-            'step' => self::class,
-            'run_id' => $run->id,
-            'period' => $run->period,
-        ]);
+        Log::info('Filtrando datos por periodo', ['run_id' => $run->id, 'period' => $run->period]);
 
         // Si periodo es "Todos Los Periodos", no filtrar nada
         if ($this->isAllPeriods($run->period)) {
-            Log::info('✅ Periodo configurado como "Todos Los Periodos", omitiendo filtrado', [
+            $bascarTotal = DB::table('data_source_bascar')->where('run_id', $run->id)->count();
+            $pagaplTotal = DB::table('data_source_pagapl')->where('run_id', $run->id)->count();
+
+            Log::info('Filtrado de datos completado (todos los periodos - sin filtrar)', [
                 'run_id' => $run->id,
-                'period' => $run->period,
+                'periodo' => $run->period,
+                'bascar_registros' => $bascarTotal,
+                'pagapl_registros' => $pagaplTotal,
+                'mensaje' => 'No se eliminó ningún registro, se procesan todos los periodos',
             ]);
             return;
         }
@@ -57,128 +59,93 @@ final class FilterDataByPeriodStep implements ProcessingStepInterface
             );
         }
 
-        Log::info('📊 Filtrando datos por periodo específico', [
-            'run_id' => $run->id,
-            'period' => $run->period,
-        ]);
-
-        // Filtrar BASCAR por periodo (YYYYMM)
         $this->filterBascarByPeriod($run);
-
-        // Filtrar PAGAPL por año en sheet_name
         $this->filterPagaplBySheetName($run);
 
-        // TODO: Agregar filtros para otras tablas según reglas de negocio
+        // Contar registros finales
+        $bascarFinal = DB::table('data_source_bascar')->where('run_id', $run->id)->count();
+        $pagaplFinal = DB::table('data_source_pagapl')->where('run_id', $run->id)->count();
 
-        $duration = (int) ((microtime(true) - $startTime) * 1000);
-
-        Log::info('✅ Filtrado de datos completado', [
+        Log::info('✅ Filtrado de datos completado exitosamente', [
             'run_id' => $run->id,
-            'period' => $run->period,
-            'duration_ms' => $duration,
+            'periodo' => $run->period,
+            'bascar_final' => $bascarFinal,
+            'pagapl_final' => $pagaplFinal,
         ]);
     }
 
     /**
      * Filtra tabla BASCAR por periodo:
-     * 1. Crea columna 'periodo' si no existe
-     * 2. Extrae periodo de fecha_inicio_vig (DD/MM/YYYY → YYYYMM)
-     * 3. Elimina registros que no correspondan al periodo del run
+     * 1. Extrae periodo de fecha_inicio_vig (DD/MM/YYYY o D/M/YYYY → YYYYMM)
+     * 2. Elimina registros que no correspondan al periodo del run
+     *
+     * IMPORTANTE: Las fechas vienen normalizadas por NormalizeDateFormatsStep.
+     * El binario Go excel_to_csv convierte fechas de Excel a formato MM-DD-YY.
+     * NormalizeDateFormatsStep las convierte de vuelta a D/M/YYYY antes de este filtrado.
+     *
+     * Formatos soportados después de normalización:
+     * - DD/MM/YYYY (2 dígitos día, 2 dígitos mes, 4 dígitos año)
+     * - D/M/YYYY  (1-2 dígitos día, 1-2 dígitos mes, 4 dígitos año)
+     *
+     * Nota: La columna 'periodo' ya fue creada por CreateBascarIndexesStep (paso 2)
      */
     private function filterBascarByPeriod(CollectionNoticeRun $run): void
     {
         $tableName = 'data_source_bascar';
-        $runId = $run->id;
-        $targetPeriod = $run->period;
 
-        Log::info('🔧 Procesando BASCAR: Extrayendo y filtrando por periodo', [
-            'run_id' => $runId,
-            'table' => $tableName,
-            'target_period' => $targetPeriod,
-        ]);
+        // Contar registros antes del filtrado
+        $totalBefore = DB::table($tableName)->where('run_id', $run->id)->count();
 
-        // Paso 1: Agregar columna 'periodo' si no existe
-        if (!$this->columnExists($tableName, 'periodo')) {
-            Log::info('Creando columna periodo en BASCAR', [
-                'run_id' => $runId,
-                'table' => $tableName,
-            ]);
-
-            DB::statement("
-                ALTER TABLE {$tableName}
-                ADD COLUMN periodo VARCHAR(6)
-            ");
-
-            Log::info('✅ Columna periodo creada', [
-                'run_id' => $runId,
-                'table' => $tableName,
-            ]);
-        }
-
-        // Paso 2: Extraer periodo de fecha_inicio_vig separando por '/'
-        // Formato: D/MM/YYYY o DD/MM/YYYY → YYYYMM
-        // Ejemplo: "1/08/2025" → "202508", "15/08/2025" → "202508"
-        Log::info('Extrayendo periodo de fecha_inicio_vig', [
-            'run_id' => $runId,
-            'table' => $tableName,
-        ]);
-
+        // Extraer periodo de fecha_inicio_vig
+        // Solo maneja formato DD/MM/YYYY o D/M/YYYY (año de 4 dígitos)
         $updated = DB::statement("
             UPDATE {$tableName}
-            SET periodo = CONCAT(
-                SPLIT_PART(fecha_inicio_vig, '/', 3),  -- Año (YYYY)
-                LPAD(SPLIT_PART(fecha_inicio_vig, '/', 2), 2, '0')  -- Mes (MM) con padding
-            )
+            SET periodo = CASE
+                -- Formato D/M/YYYY o DD/MM/YYYY (1-2 dígitos día/mes, 4 dígitos año)
+                WHEN fecha_inicio_vig ~ '^[0-9]{1,2}/[0-9]{1,2}/[0-9]{4}$' THEN
+                    CONCAT(
+                        SPLIT_PART(fecha_inicio_vig, '/', 3),
+                        LPAD(SPLIT_PART(fecha_inicio_vig, '/', 2), 2, '0')
+                    )
+                ELSE NULL
+            END
             WHERE run_id = ?
             AND fecha_inicio_vig IS NOT NULL
             AND fecha_inicio_vig != ''
-            AND fecha_inicio_vig ~ '^[0-9]{1,2}/[0-9]{1,2}/[0-9]{4}$'  -- Validar formato D/M/YYYY
-        ", [$runId]);
+        ", [$run->id]);
 
-        Log::info('✅ Periodo extraído de fecha_inicio_vig', [
-            'run_id' => $runId,
-            'table' => $tableName,
-        ]);
-
-        // Contar registros antes de eliminar
-        $totalBefore = DB::table($tableName)
-            ->where('run_id', $runId)
-            ->count();
-
+        // Contar registros que coinciden con el periodo
         $matchingPeriod = DB::table($tableName)
-            ->where('run_id', $runId)
-            ->where('periodo', $targetPeriod)
+            ->where('run_id', $run->id)
+            ->where('periodo', $run->period)
             ->count();
 
-        Log::info('Registros por periodo en BASCAR', [
-            'run_id' => $runId,
-            'total_records' => $totalBefore,
-            'matching_period' => $matchingPeriod,
-            'target_period' => $targetPeriod,
-            'to_delete' => $totalBefore - $matchingPeriod,
-        ]);
+        // Contar registros sin periodo (fechas inválidas)
+        $withoutPeriod = DB::table($tableName)
+            ->where('run_id', $run->id)
+            ->whereNull('periodo')
+            ->count();
 
-        // Paso 3: Eliminar registros que no correspondan al periodo
+        // Eliminar registros que no correspondan al periodo
         $deleted = DB::table($tableName)
-            ->where('run_id', $runId)
-            ->where('periodo', '!=', $targetPeriod)
+            ->where('run_id', $run->id)
+            ->where('periodo', '!=', $run->period)
             ->delete();
 
-        Log::info('✅ Registros eliminados de BASCAR por periodo', [
-            'run_id' => $runId,
-            'table' => $tableName,
-            'deleted' => $deleted,
-            'remaining' => $matchingPeriod,
-            'period' => $targetPeriod,
-        ]);
+        $totalAfter = DB::table($tableName)->where('run_id', $run->id)->count();
 
-        // Validar que quedaron registros
-        if ($matchingPeriod === 0) {
-            Log::warning('⚠️  No quedaron registros en BASCAR después de filtrar por periodo', [
-                'run_id' => $runId,
-                'period' => $targetPeriod,
-            ]);
-        }
+        Log::info('Filtrado de BASCAR por periodo', [
+            'run_id' => $run->id,
+            'periodo_buscado' => $run->period,
+            'total_antes' => $totalBefore,
+            'coinciden_periodo' => $matchingPeriod,
+            'sin_periodo_valido' => $withoutPeriod,
+            'eliminados' => $deleted,
+            'total_despues' => $totalAfter,
+            'porcentaje_conservado' => $totalBefore > 0
+                ? round(($totalAfter / $totalBefore) * 100, 2) . '%'
+                : '0%',
+        ]);
     }
 
     /**
@@ -195,86 +162,54 @@ final class FilterDataByPeriodStep implements ProcessingStepInterface
     private function filterPagaplBySheetName(CollectionNoticeRun $run): void
     {
         $tableName = 'data_source_pagapl';
-        $runId = $run->id;
-        $targetPeriod = $run->period;
+        $targetYear = substr($run->period, 0, 4);
 
-        // Extraer año del periodo (YYYYMM → YYYY)
-        $targetYear = substr($targetPeriod, 0, 4);
+        // Contar registros antes del filtrado
+        $totalBefore = DB::table($tableName)->where('run_id', $run->id)->count();
 
-        Log::info('🔧 Procesando PAGAPL: Filtrando por sheet_name según año', [
-            'run_id' => $runId,
-            'table' => $tableName,
-            'target_period' => $targetPeriod,
-            'target_year' => $targetYear,
-        ]);
-
-        // Obtener sheet_names únicos antes de filtrar
-        $sheetsBefore = DB::table($tableName)
-            ->where('run_id', $runId)
-            ->select('sheet_name', DB::raw('COUNT(*) as count'))
-            ->groupBy('sheet_name')
-            ->get();
-
-        Log::info('Hojas disponibles en PAGAPL antes de filtrar', [
-            'run_id' => $runId,
-            'sheets' => $sheetsBefore->map(fn($s) => [
-                'name' => $s->sheet_name,
-                'count' => $s->count,
-            ])->toArray(),
-        ]);
-
-        // Contar registros antes de eliminar
-        $totalBefore = DB::table($tableName)
-            ->where('run_id', $runId)
-            ->count();
-
-        // Contar registros que coinciden con el año
-        $matchingYear = DB::table($tableName)
-            ->where('run_id', $runId)
+        // Contar registros que contienen el año buscado
+        $matching = DB::table($tableName)
+            ->where('run_id', $run->id)
             ->where('sheet_name', 'LIKE', "%{$targetYear}%")
             ->count();
 
-        Log::info('Análisis de registros por año en PAGAPL', [
-            'run_id' => $runId,
-            'total_records' => $totalBefore,
-            'matching_year' => $matchingYear,
-            'target_year' => $targetYear,
-            'to_delete' => $totalBefore - $matchingYear,
-        ]);
+        // Obtener nombres únicos de hojas antes del filtrado
+        $sheetsBefore = DB::table($tableName)
+            ->where('run_id', $run->id)
+            ->distinct()
+            ->pluck('sheet_name')
+            ->toArray();
 
         // Eliminar registros donde sheet_name NO contenga el año
         $deleted = DB::table($tableName)
-            ->where('run_id', $runId)
+            ->where('run_id', $run->id)
             ->where('sheet_name', 'NOT LIKE', "%{$targetYear}%")
             ->delete();
 
-        // Obtener sheet_names únicos después de filtrar
+        $totalAfter = DB::table($tableName)->where('run_id', $run->id)->count();
+
+        // Obtener nombres únicos de hojas después del filtrado
         $sheetsAfter = DB::table($tableName)
-            ->where('run_id', $runId)
-            ->select('sheet_name', DB::raw('COUNT(*) as count'))
-            ->groupBy('sheet_name')
-            ->get();
+            ->where('run_id', $run->id)
+            ->distinct()
+            ->pluck('sheet_name')
+            ->toArray();
 
-        Log::info('✅ Registros eliminados de PAGAPL por sheet_name', [
-            'run_id' => $runId,
-            'table' => $tableName,
-            'deleted' => $deleted,
-            'remaining' => $matchingYear,
-            'target_year' => $targetYear,
-            'remaining_sheets' => $sheetsAfter->map(fn($s) => [
-                'name' => $s->sheet_name,
-                'count' => $s->count,
-            ])->toArray(),
+        Log::info('Filtrado de PAGAPL por año', [
+            'run_id' => $run->id,
+            'periodo_buscado' => $run->period,
+            'año_buscado' => $targetYear,
+            'total_antes' => $totalBefore,
+            'coinciden_año' => $matching,
+            'eliminados' => $deleted,
+            'total_despues' => $totalAfter,
+            'hojas_antes' => $sheetsBefore,
+            'hojas_despues' => $sheetsAfter,
+            'hojas_eliminadas' => array_diff($sheetsBefore, $sheetsAfter),
+            'porcentaje_conservado' => $totalBefore > 0
+                ? round(($totalAfter / $totalBefore) * 100, 2) . '%'
+                : '0%',
         ]);
-
-        // Validar que quedaron registros
-        if ($matchingYear === 0) {
-            Log::warning('⚠️  No quedaron registros en PAGAPL después de filtrar por año', [
-                'run_id' => $runId,
-                'target_year' => $targetYear,
-                'available_sheets' => $sheetsBefore->pluck('sheet_name')->toArray(),
-            ]);
-        }
     }
 
     /**
@@ -323,20 +258,5 @@ final class FilterDataByPeriodStep implements ProcessingStepInterface
         }
 
         return true;
-    }
-
-    /**
-     * Verifica si una columna existe en una tabla.
-     */
-    private function columnExists(string $tableName, string $columnName): bool
-    {
-        $result = DB::select("
-            SELECT column_name
-            FROM information_schema.columns
-            WHERE table_name = ?
-            AND column_name = ?
-        ", [$tableName, $columnName]);
-
-        return count($result) > 0;
     }
 }

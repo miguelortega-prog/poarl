@@ -58,6 +58,8 @@ class LoadExcelWithCopyJob implements ShouldQueue
         'PAGPLA' => 'data_source_pagpla',
         'DATPOL' => 'data_source_datpol',
         'DETTRA' => 'data_source_dettra',
+        'BASACT' => 'data_source_basact',
+        'PAGLOG' => 'data_source_paglog',
     ];
 
     public function __construct(
@@ -81,6 +83,16 @@ class LoadExcelWithCopyJob implements ShouldQueue
             return;
         }
 
+        // Verificar si el archivo ya fue importado completamente
+        if ($file->isCompleted()) {
+            Log::info('Archivo ya fue importado, omitiendo', [
+                'file_id' => $this->fileId,
+                'data_source' => $this->dataSourceCode,
+                'completed_at' => $file->import_completed_at,
+            ]);
+            return;
+        }
+
         $runId = $file->collection_notice_run_id;
         $tableName = self::TABLE_MAP[$this->dataSourceCode] ?? null;
 
@@ -88,30 +100,17 @@ class LoadExcelWithCopyJob implements ShouldQueue
             throw new \RuntimeException("Data source no soportado: {$this->dataSourceCode}");
         }
 
-        Log::info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-        Log::info('🚀 INICIANDO IMPORTACIÓN EXCEL');
-        Log::info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-        Log::info('📊 Data Source: ' . $this->dataSourceCode);
-        Log::info('📁 Archivo: ' . basename($file->path));
-        Log::info('💾 Tamaño: ' . round($file->size / 1024 / 1024, 2) . ' MB');
-        Log::info('🎯 Tabla destino: ' . $tableName);
-        Log::info('⚙️  Método: Go Excelize → PostgreSQL COPY');
-        Log::info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        // Marcar archivo como en proceso
+        $file->markAsProcessing();
 
-        // IDEMPOTENCIA: Limpiar tabla antes de insertar para evitar duplicados
-        Log::info('Limpiando tabla Excel para garantizar idempotencia', [
+        Log::info('Iniciando importación Excel', [
+            'data_source' => $this->dataSourceCode,
             'table' => $tableName,
             'run_id' => $runId,
+            'file_id' => $this->fileId,
         ]);
 
         $deleted = DB::table($tableName)->where('run_id', $runId)->delete();
-        if ($deleted > 0) {
-            Log::warning('Registros previos eliminados (idempotencia)', [
-                'table' => $tableName,
-                'run_id' => $runId,
-                'deleted_rows' => $deleted,
-            ]);
-        }
 
         $disk = $filesystem->disk($file->disk);
         $tempDir = 'temp/excel_import_' . $this->fileId;
@@ -125,20 +124,10 @@ class LoadExcelWithCopyJob implements ShouldQueue
                 $tempDir
             );
 
-            Log::info('');
-            Log::info('✅ CONVERSIÓN EXCEL → CSV COMPLETADA');
-            Log::info('📋 Total de hojas: ' . count($conversionResult['sheets']));
-            Log::info('📄 Hojas procesadas: ' . implode(', ', array_keys($conversionResult['sheets'])));
-            Log::info('');
-
             // Paso 2: Obtener columnas de la tabla destino (excluir id y created_at)
             $columns = $this->getTableColumns($tableName);
 
             // Paso 3: Importar cada CSV con COPY FROM STDIN (10-50x más rápido)
-            Log::info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-            Log::info('⬆️  INICIANDO IMPORTACIÓN A BASE DE DATOS');
-            Log::info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-
             $totalRowsImported = 0;
 
             foreach ($conversionResult['sheets'] as $sheetName => $sheetInfo) {
@@ -147,11 +136,6 @@ class LoadExcelWithCopyJob implements ShouldQueue
 
                 // Asegurar que $sheetName sea string (puede venir como int si es numérico)
                 $sheetName = (string) $sheetName;
-
-                Log::info('');
-                Log::info('📄 Procesando hoja: ' . $sheetName);
-                Log::info('   ├─ Filas esperadas: ' . number_format($sheetInfo['rows']));
-                Log::info('   └─ Tamaño: ' . round($sheetInfo['size'] / 1024 / 1024, 2) . ' MB');
 
                 // Paso 1: Normalizar CSV para que tenga todas las columnas de la tabla
                 $normalizedCsv = $this->normalizeCSV($csvPath, $columns, ';', $sheetName);
@@ -174,28 +158,22 @@ class LoadExcelWithCopyJob implements ShouldQueue
                 );
 
                 $totalRowsImported += $result['rows'];
-
-                $rowsPerSecond = $result['duration_ms'] > 0
-                    ? round($result['rows'] / ($result['duration_ms'] / 1000))
-                    : 0;
-
-                Log::info('   ✅ Importación completada');
-                Log::info('   ├─ Registros: ' . number_format($result['rows']));
-                Log::info('   ├─ Duración: ' . round($result['duration_ms'] / 1000, 2) . 's');
-                Log::info('   └─ Velocidad: ' . number_format($rowsPerSecond) . ' filas/seg');
             }
 
-            Log::info('');
-            Log::info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-            Log::info('🎉 IMPORTACIÓN EXCEL COMPLETADA EXITOSAMENTE');
-            Log::info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-            Log::info('📊 Total de hojas: ' . count($conversionResult['sheets']));
-            Log::info('📈 Total de registros: ' . number_format($totalRowsImported));
-            Log::info('✅ Data Source: ' . $this->dataSourceCode);
-            Log::info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-            Log::info('');
+            // Marcar archivo como completado exitosamente
+            $file->markAsCompleted();
+
+            Log::info('Importación Excel completada', [
+                'data_source' => $this->dataSourceCode,
+                'run_id' => $runId,
+                'file_id' => $this->fileId,
+                'total_rows' => $totalRowsImported,
+            ]);
 
         } catch (Throwable $exception) {
+            // Marcar archivo como fallido
+            $file->markAsFailed($exception->getMessage());
+
             Log::error('Error en carga optimizada Excel → COPY', [
                 'file_id' => $this->fileId,
                 'run_id' => $runId,
@@ -217,11 +195,6 @@ class LoadExcelWithCopyJob implements ShouldQueue
             if ($disk->exists($tempDir)) {
                 $disk->deleteDirectory($tempDir);
             }
-
-            Log::info('CSVs temporales eliminados', [
-                'file_id' => $this->fileId,
-                'temp_dir' => $tempDir,
-            ]);
         }
     }
 
@@ -264,9 +237,11 @@ class LoadExcelWithCopyJob implements ShouldQueue
         $input = fopen($csvPath, 'r');
         $output = fopen($outputPath, 'w');
 
-        // Leer header del CSV y splitear por delimitador
+        // Leer header del CSV usando str_getcsv para manejar comillas correctamente
         $headerLine = fgets($input);
-        $csvHeaders = explode($delimiter, trim($headerLine));
+        $csvHeaders = str_getcsv(trim($headerLine), $delimiter, '"', '\\');
+        // Trim cada header para eliminar espacios que puedan venir del Excel
+        $csvHeaders = array_map('trim', $csvHeaders);
 
         // Normalizar headers a minúsculas para comparación case-insensitive
         $csvHeadersLower = array_map('strtolower', $csvHeaders);
@@ -280,16 +255,9 @@ class LoadExcelWithCopyJob implements ShouldQueue
             $columnMapping[$expectedCol] = $index !== false ? $index : null;
         }
 
-        // Log para debugging
-        Log::info('Normalizando CSV', [
-            'csv_path' => basename($csvPath),
-            'expected_columns' => count($expectedColumns),
-            'sheet_name' => $sheetName,
-            'has_sheet_name_column' => in_array('sheet_name', $expectedColumns),
-        ]);
-
-        // Escribir header normalizado usando fputcsv para manejar comillas correctamente
-        fputcsv($output, $expectedColumns, $delimiter, '"', '\\');
+        // Escribir header normalizado usando fputcsv
+        // Usamos chr(0) como escape para seguir RFC 4180 (solo duplicar comillas, sin backslash)
+        fputcsv($output, $expectedColumns, $delimiter, '"', chr(0));
 
         // Procesar cada línea de datos
         while (($line = fgets($input)) !== false) {
@@ -318,8 +286,8 @@ class LoadExcelWithCopyJob implements ShouldQueue
                 }
             }
 
-            // Usar fputcsv en lugar de implode para manejar correctamente valores con delimitador
-            fputcsv($output, $normalizedRow, $delimiter, '"', '\\');
+            // Usar fputcsv - chr(0) para RFC 4180 (duplicar comillas, no backslash)
+            fputcsv($output, $normalizedRow, $delimiter, '"', chr(0));
         }
 
         fclose($input);
@@ -330,6 +298,7 @@ class LoadExcelWithCopyJob implements ShouldQueue
 
     /**
      * Agrega run_id al inicio de cada línea del CSV.
+     * Usa fgetcsv() para manejar correctamente campos con saltos de línea.
      */
     private function addRunIdToCSV(string $csvPath, int $runId): string
     {
@@ -338,14 +307,17 @@ class LoadExcelWithCopyJob implements ShouldQueue
         $output = fopen($outputPath, 'w');
 
         $isFirstLine = true;
-        while (($line = fgets($input)) !== false) {
+        // Leer con el mismo estándar que usamos para escribir
+        while (($row = fgetcsv($input, 0, ';', '"', chr(0))) !== false) {
             if ($isFirstLine) {
                 // Agregar "run_id" al header
-                fwrite($output, 'run_id;' . $line);
+                array_unshift($row, 'run_id');
+                fputcsv($output, $row, ';', '"', chr(0));
                 $isFirstLine = false;
             } else {
-                // Agregar el run_id al inicio de cada línea
-                fwrite($output, $runId . ';' . $line);
+                // Agregar el run_id al inicio de cada fila
+                array_unshift($row, $runId);
+                fputcsv($output, $row, ';', '"', chr(0));
             }
         }
 
@@ -376,15 +348,7 @@ class LoadExcelWithCopyJob implements ShouldQueue
                 $file = CollectionNoticeRunFile::find($this->fileId);
                 if ($file) {
                     $runId = $file->collection_notice_run_id;
-                    $deleted = DB::table($tableName)->where('run_id', $runId)->delete();
-
-                    if ($deleted > 0) {
-                        Log::warning('Datos parciales eliminados después del fallo', [
-                            'table' => $tableName,
-                            'run_id' => $runId,
-                            'deleted_rows' => $deleted,
-                        ]);
-                    }
+                    DB::table($tableName)->where('run_id', $runId)->delete();
                 }
             } catch (Throwable $e) {
                 Log::error('Error al limpiar datos parciales en failed()', [

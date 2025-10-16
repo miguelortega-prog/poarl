@@ -23,10 +23,21 @@ use Illuminate\Support\Facades\Log;
  * - CLS_RICT: 'I' (número romano 1)
  * - FCH_INVI: '01010001' (valor fijo)
  * - TPO_COT: '0' (valor fijo)
+ * - FCH_FIN: 'NO REGISTRA' (valor fijo)
  * - TRAB_EXPUESTOS: 1 (valor fijo)
  */
 final class AppendBascarSinTrabajadoresStep implements ProcessingStepInterface
 {
+    /**
+     * Constantes para valores fijos en el archivo de detalle.
+     */
+    private const CLS_RICT = 'I';               // Número romano 1
+    private const FCH_INVI = '01010001';        // Fecha de inicio de vigencia fija
+    private const TPO_COT = '0';                // Tipo de cotizante
+    private const FCH_FIN = 'NO REGISTRA';      // Fecha fin (sin registro)
+    private const TRAB_EXPUESTOS = 1;           // Trabajadores expuestos por defecto
+    private const NRO_IDVI_DEFAULT = '';        // NRO_IDVI pendiente de definir
+
     public function __construct(
         private readonly FilesystemFactory $filesystem
     ) {
@@ -39,38 +50,18 @@ final class AppendBascarSinTrabajadoresStep implements ProcessingStepInterface
 
     public function execute(CollectionNoticeRun $run): void
     {
-        $startTime = microtime(true);
+        Log::info('Agregando registros de BASCAR sin trabajadores activos', ['run_id' => $run->id]);
 
-        Log::info('📋 Agregando registros de BASCAR sin trabajadores activos', [
-            'step' => self::class,
-            'run_id' => $run->id,
-        ]);
-
-        // Contar registros sin trabajadores activos
         $totalRecords = $this->countBascarWithoutWorkers($run);
 
         if ($totalRecords === 0) {
-            Log::info('No hay registros de BASCAR sin trabajadores activos', [
-                'run_id' => $run->id,
-            ]);
+            Log::info('Registros sin trabajadores agregados al detalle', ['run_id' => $run->id]);
             return;
         }
 
-        Log::info('Registros de BASCAR sin trabajadores encontrados', [
-            'run_id' => $run->id,
-            'total' => $totalRecords,
-        ]);
-
-        // Agregar registros al archivo existente
         $this->appendToWorkerDetailFile($run, $totalRecords);
 
-        $duration = (int) ((microtime(true) - $startTime) * 1000);
-
-        Log::info('✅ Registros sin trabajadores agregados al detalle', [
-            'run_id' => $run->id,
-            'records_added' => $totalRecords,
-            'duration_ms' => $duration,
-        ]);
+        Log::info('Registros sin trabajadores agregados al detalle', ['run_id' => $run->id]);
     }
 
     /**
@@ -97,39 +88,20 @@ final class AppendBascarSinTrabajadoresStep implements ProcessingStepInterface
 
         $disk = $this->filesystem->disk('collection');
 
-        // Verificar si el archivo existe
         if (!$disk->exists($relativePath)) {
-            Log::warning('Archivo de detalle de trabajadores no existe, se creará nuevo', [
-                'run_id' => $run->id,
-                'file_path' => $relativePath,
-            ]);
-
-            // Crear directorio si no existe
             if (!$disk->exists($relativeDir)) {
                 $disk->makeDirectory($relativeDir);
             }
-
-            // Crear archivo con encabezado
             $disk->put($relativePath, "TPO_IDEN_TRABAJADOR;NRO_IDEN;AÑO;MES;TPO_EMP;NRO_IDVI;CLS_RICT;FCH_INVI;PÓLIZA;VALOR;TPO_COT;FCH_FIN;TRAB_EXPUESTOS\n");
         }
 
         $existingContent = $disk->get($relativePath);
 
-        Log::info('Agregando registros sin trabajadores al archivo', [
-            'run_id' => $run->id,
-            'total_records' => $totalRecords,
-            'file' => $fileName,
-        ]);
-
-        // Extraer año y mes del período (formato YYYYMM)
         $period = $run->period;
         $year = substr($period, 0, 4);
         $month = substr($period, 4, 2);
 
-        // Generar contenido nuevo
         $newContent = '';
-
-        // Procesar en chunks
         $chunkSize = 5000;
         $offset = 0;
         $processedRows = 0;
@@ -137,10 +109,10 @@ final class AppendBascarSinTrabajadoresStep implements ProcessingStepInterface
         while ($offset < $totalRecords) {
             $rows = DB::select("
                 SELECT
-                    IDENT_ASEGURADO,
-                    NUM_TOMADOR,
-                    NUM_POLIZA,
-                    VALOR_TOTAL_FACT
+                    ident_asegurado,
+                    num_tomador,
+                    num_poliza,
+                    valor_total_fact
                 FROM data_source_bascar
                 WHERE run_id = ?
                     AND observacion_trabajadores = 'Sin trabajadores activos'
@@ -150,28 +122,23 @@ final class AppendBascarSinTrabajadoresStep implements ProcessingStepInterface
             ", [$run->id, $chunkSize, $offset]);
 
             foreach ($rows as $row) {
-                // TODO: NRO_IDVI pendiente de definir - actualmente se deja vacío
-                $nroIdvi = '';
-
-                // TODO: NUM_POLIZA está quedando en notación científica en el job de almacenamiento
-                // Esto debe corregirse en LoadCsvDataSourcesJob o LoadExcelWithCopyJob
-                $poliza = $row->NUM_POLIZA ?? '';
+                $poliza = $row->num_poliza ?? '';
 
                 $newContent .= sprintf(
                     "%s;%s;%s;%s;%s;%s;%s;%s;%s;%s;%s;%s;%s\n",
-                    $row->IDENT_ASEGURADO ?? '',    // TPO_IDEN_TRABAJADOR
-                    $row->NUM_TOMADOR ?? '',         // NRO_IDEN
+                    $row->ident_asegurado ?? '',    // TPO_IDEN_TRABAJADOR
+                    $row->num_tomador ?? '',         // NRO_IDEN
                     $year,                           // AÑO
                     $month,                          // MES
-                    $row->IDENT_ASEGURADO ?? '',    // TPO_EMP
-                    $nroIdvi,                        // NRO_IDVI (TODO: pendiente definir)
-                    'I',                             // CLS_RICT (número romano 1)
-                    '01010001',                      // FCH_INVI (valor fijo)
-                    $poliza,                         // PÓLIZA (TODO: notación científica)
-                    $row->VALOR_TOTAL_FACT ?? 0,    // VALOR
-                    '0',                             // TPO_COT (valor fijo)
-                    'NO REGISTRA',                   // FCH_FIN (valor fijo)
-                    1                                // TRAB_EXPUESTOS (valor fijo)
+                    $row->ident_asegurado ?? '',    // TPO_EMP
+                    $row->num_tomador ?? '',        // NRO_IDVI mismo del tomador
+                    self::CLS_RICT,                 // CLS_RICT (número romano 1)
+                    self::FCH_INVI,                 // FCH_INVI (valor fijo)
+                    $poliza,                         // PÓLIZA
+                    $row->valor_total_fact ?? 0,    // VALOR
+                    self::TPO_COT,                  // TPO_COT (valor fijo)
+                    self::FCH_FIN,                  // FCH_FIN (valor fijo)
+                    self::TRAB_EXPUESTOS            // TRAB_EXPUESTOS (valor fijo)
                 );
                 $processedRows++;
             }
@@ -179,18 +146,15 @@ final class AppendBascarSinTrabajadoresStep implements ProcessingStepInterface
             $offset += $chunkSize;
         }
 
-        // Guardar archivo (append)
         $finalContent = $existingContent . $newContent;
         $disk->put($relativePath, $finalContent);
         $fileSize = $disk->size($relativePath);
 
-        // Actualizar registro en base de datos
         $existingFile = CollectionNoticeRunResultFile::where('collection_notice_run_id', $run->id)
             ->where('file_type', 'detalle_trabajadores')
             ->first();
 
         if ($existingFile) {
-            // Actualizar registro existente
             $existingFile->update([
                 'size' => $fileSize,
                 'records_count' => ($existingFile->records_count ?? 0) + $processedRows,
@@ -199,16 +163,7 @@ final class AppendBascarSinTrabajadoresStep implements ProcessingStepInterface
                     'bascar_sin_trabajadores_added' => $processedRows,
                 ]),
             ]);
-
-            Log::info('✅ Archivo de detalle actualizado', [
-                'run_id' => $run->id,
-                'file_path' => $relativePath,
-                'new_records' => $processedRows,
-                'total_records' => $existingFile->records_count,
-                'size_kb' => round($fileSize / 1024, 2),
-            ]);
         } else {
-            // Crear nuevo registro
             CollectionNoticeRunResultFile::create([
                 'collection_notice_run_id' => $run->id,
                 'file_type' => 'detalle_trabajadores',
@@ -222,13 +177,6 @@ final class AppendBascarSinTrabajadoresStep implements ProcessingStepInterface
                     'step' => 'append_bascar_sin_trabajadores',
                     'period' => $run->period,
                 ],
-            ]);
-
-            Log::info('✅ Archivo de detalle creado', [
-                'run_id' => $run->id,
-                'file_path' => $relativePath,
-                'records_count' => $processedRows,
-                'size_kb' => round($fileSize / 1024, 2),
             ]);
         }
     }

@@ -102,22 +102,6 @@ final class ResilientCsvImporter
                 $currentLine++;
                 $totalRows++;
 
-                // Log primera línea para debug
-                if ($currentLine === 2) {
-                    Log::info('Primera línea de datos leída', [
-                        'line_number' => $currentLine,
-                        'line_preview' => substr($line, 0, 200),
-                    ]);
-                }
-
-                // Log cada 25000 líneas para monitorear progreso (reducido para evitar ruido)
-                if ($currentLine % 25000 === 0) {
-                    Log::info('CSV - progreso', [
-                        'line' => number_format($currentLine),
-                        'memoria_mb' => round(memory_get_usage(true) / 1024 / 1024, 1),
-                    ]);
-                }
-
                 // Parsear línea CSV
                 $parsedData = str_getcsv($line, $delimiter);
 

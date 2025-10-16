@@ -30,6 +30,8 @@ final class CleanupDataSourcesStep implements ProcessingStepInterface
         'data_source_pagpla',
         'data_source_datpol',
         'data_source_dettra',
+        'data_source_basact',
+        'data_source_paglog',
     ];
 
     public function getName(): string
@@ -39,51 +41,20 @@ final class CleanupDataSourcesStep implements ProcessingStepInterface
 
     public function execute(CollectionNoticeRun $run): void
     {
-        $startTime = microtime(true);
-
-        Log::info('🗑️  Limpiando datos de tablas data_source_', [
-            'step' => self::class,
-            'run_id' => $run->id,
-        ]);
-
-        $totalDeleted = 0;
+        Log::info('Limpiando datos de data sources', ['run_id' => $run->id]);
 
         foreach (self::DATA_SOURCE_TABLES as $table) {
-            $deleted = $this->cleanupTable($table, $run->id);
-            $totalDeleted += $deleted;
+            $this->cleanupTable($table, $run->id);
         }
 
-        $duration = (int) ((microtime(true) - $startTime) * 1000);
-
-        Log::info('✅ Datos de data sources eliminados', [
-            'run_id' => $run->id,
-            'total_deleted' => $totalDeleted,
-            'tables_cleaned' => count(self::DATA_SOURCE_TABLES),
-            'duration_ms' => $duration,
-        ]);
+        Log::info('Datos de data sources eliminados', ['run_id' => $run->id]);
     }
 
     /**
      * Elimina registros de una tabla específica.
      */
-    private function cleanupTable(string $table, int $runId): int
+    private function cleanupTable(string $table, int $runId): void
     {
-        Log::info('Limpiando tabla', [
-            'table' => $table,
-            'run_id' => $runId,
-        ]);
-
-        $deleted = DB::delete("
-            DELETE FROM {$table}
-            WHERE run_id = ?
-        ", [$runId]);
-
-        Log::info('Tabla limpiada', [
-            'table' => $table,
-            'run_id' => $runId,
-            'deleted_rows' => $deleted,
-        ]);
-
-        return $deleted;
+        DB::delete("DELETE FROM {$table} WHERE run_id = ?", [$runId]);
     }
 }

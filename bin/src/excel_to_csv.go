@@ -81,7 +81,9 @@ func main() {
 		writer := csv.NewWriter(csvFile)
 		writer.Comma = rune((*delimiter)[0])
 
-		rows, err := f.Rows(sheetName)
+		// IMPORTANTE: Usar GetRows() con opción RawCellValue para NO formatear fechas automáticamente
+		// Esto preserva el texto tal como se muestra en Excel
+		rows, err := f.GetRows(sheetName, excelize.Options{RawCellValue: true})
 		if err != nil {
 			csvFile.Close()
 			result.Success = false
@@ -91,20 +93,18 @@ func main() {
 		}
 
 		rowCount := 0
-		isFirstRow := true
 
-		for rows.Next() {
-			row, err := rows.Columns()
-			if err != nil {
-				continue
-			}
+		for rowIndex, row := range rows {
+			rowCount++
 
-			// Agregar columna sheet_name al header (primera fila)
-			if isFirstRow {
+			// Para todas las filas (incluyendo header), agregar columna sheet_name
+			if rowIndex == 0 {
+				// Primera fila es el header
 				row = append(row, "sheet_name")
-				isFirstRow = false
 			} else {
-				// Agregar valor de sheet_name a las filas de datos
+				// Para filas de datos, agregar valor de sheet_name
+				// IMPORTANTE: RawCellValue: true lee los valores sin aplicar formato
+				// Las fechas se mantienen como texto visible en Excel (6/01/2024)
 				row = append(row, sheetName)
 			}
 
@@ -115,16 +115,6 @@ func main() {
 				outputJSON(result)
 				os.Exit(1)
 			}
-
-			rowCount++
-		}
-
-		if err := rows.Close(); err != nil {
-			csvFile.Close()
-			result.Success = false
-			result.Error = fmt.Sprintf("Error closing rows iterator: %v", err)
-			outputJSON(result)
-			os.Exit(1)
 		}
 
 		writer.Flush()

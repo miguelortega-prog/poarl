@@ -44,82 +44,122 @@ final class SanitizeNumericFieldsStep implements ProcessingStepInterface
 
     public function execute(CollectionNoticeRun $run): void
     {
-        $startTime = microtime(true);
-
-        Log::info('🧹 Sanitizando campos numéricos en data sources', [
-            'step' => self::class,
-            'run_id' => $run->id,
-        ]);
-
-        $totalFieldsSanitized = 0;
+        Log::info('Sanitizando campos numéricos', ['run_id' => $run->id]);
 
         foreach (self::NUMERIC_FIELDS as $tableName => $columns) {
-            $sanitizedInTable = $this->sanitizeTableFields($tableName, $columns, $run);
-            $totalFieldsSanitized += $sanitizedInTable;
+            $this->sanitizeTableFields($tableName, $columns, $run);
         }
 
-        $duration = (int) ((microtime(true) - $startTime) * 1000);
-
-        Log::info('✅ Sanitización de campos numéricos completada', [
-            'run_id' => $run->id,
-            'total_fields_sanitized' => $totalFieldsSanitized,
-            'duration_ms' => $duration,
-        ]);
+        Log::info('Sanitización de campos numéricos completada', ['run_id' => $run->id]);
     }
 
     /**
      * Sanitiza campos numéricos de una tabla específica.
      *
+     * Procesa registros por chunks para:
+     * - Validar cada valor individualmente
+     * - Convertir formato europeo a estándar
+     * - Manejar errores de conversión
+     * - Actualizar BD con valores limpios
+     *
      * @param string $tableName Nombre de la tabla
      * @param array<string> $columns Lista de columnas a sanitizar
      * @param CollectionNoticeRun $run Run actual
-     * @return int Número de campos sanitizados
      */
-    private function sanitizeTableFields(string $tableName, array $columns, CollectionNoticeRun $run): int
+    private function sanitizeTableFields(string $tableName, array $columns, CollectionNoticeRun $run): void
     {
-        Log::info('Sanitizando campos numéricos en tabla', [
-            'table' => $tableName,
-            'columns' => $columns,
-            'run_id' => $run->id,
-        ]);
-
-        // Contar registros en la tabla antes de sanitizar
-        $recordCount = DB::table($tableName)
-            ->where('run_id', $run->id)
-            ->count();
+        $recordCount = DB::table($tableName)->where('run_id', $run->id)->count();
 
         if ($recordCount === 0) {
-            Log::warning('Tabla sin registros, skipping sanitización', [
-                'table' => $tableName,
-                'run_id' => $run->id,
-            ]);
-            return 0;
+            return;
         }
 
-        // Construir SET clause dinámicamente para todas las columnas
-        $setClauses = array_map(function ($column) {
-            // REPLACE(REPLACE(columna, '.', ''), ',', '.')
-            // Primero quita puntos (separador de miles), luego convierte coma a punto (decimal)
-            return "{$column} = REPLACE(REPLACE({$column}, '.', ''), ',', '.')";
-        }, $columns);
+        $chunkSize = 1000;
+        $processed = 0;
+        $errors = 0;
 
-        $setClause = implode(', ', $setClauses);
+        DB::table($tableName)
+            ->where('run_id', $run->id)
+            ->orderBy('id')
+            ->chunk($chunkSize, function ($records) use ($tableName, $columns, &$processed, &$errors) {
+                foreach ($records as $record) {
+                    $updates = [];
 
-        // Ejecutar UPDATE masivo
-        $updated = DB::update("
-            UPDATE {$tableName}
-            SET {$setClause}
-            WHERE run_id = ?
-        ", [$run->id]);
+                    foreach ($columns as $column) {
+                        $originalValue = $record->{$column} ?? null;
 
-        Log::info('✅ Campos numéricos sanitizados en tabla', [
+                        if ($originalValue === null || trim($originalValue) === '') {
+                            continue;
+                        }
+
+                        // Sanitizar valor: eliminar espacios, puntos (miles), convertir coma a punto (decimal)
+                        $sanitized = $this->sanitizeNumericValue($originalValue);
+
+                        // Validar que el resultado sea numérico válido
+                        if ($sanitized !== null && $sanitized !== $originalValue) {
+                            $updates[$column] = $sanitized;
+                        } elseif ($sanitized === null) {
+                            $errors++;
+                            Log::warning('Valor numérico inválido', [
+                                'table' => $tableName,
+                                'record_id' => $record->id,
+                                'column' => $column,
+                                'original_value' => $originalValue,
+                            ]);
+                        }
+                    }
+
+                    // Actualizar registro si hay cambios
+                    if (!empty($updates)) {
+                        DB::table($tableName)
+                            ->where('id', $record->id)
+                            ->update($updates);
+                    }
+
+                    $processed++;
+                }
+            });
+
+        Log::info('Sanitización de campos numéricos en tabla completada', [
             'table' => $tableName,
-            'run_id' => $run->id,
-            'records_in_table' => number_format($recordCount),
-            'records_updated' => number_format($updated),
-            'columns_sanitized' => $columns,
+            'columns' => $columns,
+            'processed' => $processed,
+            'errors' => $errors,
         ]);
+    }
 
-        return count($columns);
+    /**
+     * Sanitiza un valor numérico individual.
+     *
+     * En los datos, tanto el punto (.) como la coma (,) son separadores de miles.
+     * NO hay valores decimales.
+     *
+     * Conversión:
+     * - " 1.234.567 " → "1234567"
+     * - "14,861" → "14861"
+     * - "2,835,609" → "2835609"
+     * - "  100  " → "100"
+     *
+     * @param string $value Valor original
+     * @return string|null Valor sanitizado o null si es inválido
+     */
+    private function sanitizeNumericValue(string $value): ?string
+    {
+        // 1. Eliminar espacios al inicio y final
+        $cleaned = trim($value);
+
+        if ($cleaned === '') {
+            return null;
+        }
+
+        // 2. Eliminar TODOS los separadores (punto y coma son separadores de miles)
+        $cleaned = str_replace(['.', ','], '', $cleaned);
+
+        // 3. Validar que sea numérico entero
+        if (!is_numeric($cleaned)) {
+            return null;
+        }
+
+        return $cleaned;
     }
 }

@@ -51,8 +51,6 @@ final class PostgreSQLCopyImporter
         Log::info('Iniciando importación COPY usando psql CLI', [
             'table' => $tableName,
             'csv_path' => $csvPath,
-            'columns' => $columns,
-            'file_size_mb' => round($fileSize / 1024 / 1024, 2),
             'has_header' => $hasHeader,
         ]);
 
@@ -90,8 +88,10 @@ final class PostgreSQLCopyImporter
             escapeshellarg($csvPath)
         );
 
-        Log::debug('Ejecutando COPY con psql CLI', [
-            'command' => preg_replace('/PGPASSWORD=[^ ]+/', 'PGPASSWORD=***', $command),
+        Log::debug('Ejecutando COPY con psql CLI',[
+            'table' => $tableName,
+            'csv_path' => $csvPath,
+            'has_header' => $hasHeader,            
         ]);
 
         exec($command, $output, $returnCode);
@@ -118,9 +118,6 @@ final class PostgreSQLCopyImporter
         Log::info('Importación COPY completada', [
             'table' => $tableName,
             'rows_imported' => $actualRows,
-            'duration_ms' => $duration,
-            'rows_per_second' => $duration > 0 ? round($actualRows / ($duration / 1000)) : 0,
-            'mb_per_second' => $duration > 0 ? round(($fileSize / 1024 / 1024) / ($duration / 1000), 2) : 0,
         ]);
 
         return [

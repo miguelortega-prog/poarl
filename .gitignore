@@ -23,6 +23,7 @@ Homestead.json
 Homestead.yaml
 Thumbs.db
 infra
+.clinerules
 
 # Ignorar todos los archivos markdown excepto README.md
 *.md

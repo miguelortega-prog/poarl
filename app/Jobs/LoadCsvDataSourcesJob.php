@@ -47,11 +47,11 @@ final class LoadCsvDataSourcesJob implements ShouldQueue
 
     /**
      * Número de intentos del job.
-     * 1 intento (sin reintentos) para archivos grandes.
-     * Los reintentos pueden causar colisiones y timeouts en archivos de 150MB+.
+     * 3 intentos para manejar fallas transitorias (conexión DB, locks temporales, etc.).
      * La idempotencia está garantizada limpiando la tabla antes de insertar.
+     * Si falla por timeout o memoria, no vale la pena reintentar (problema de configuración).
      */
-    public int $tries = 1;
+    public int $tries = 3;
 
     /**
      * Tiempo máximo de ejecución (4 horas para archivos CSV grandes con seguridad).
@@ -60,8 +60,18 @@ final class LoadCsvDataSourcesJob implements ShouldQueue
 
     /**
      * Tiempo de espera antes de reintentar (en segundos).
+     * Backoff incremental: 30s, 60s, 120s
      */
-    public int $backoff = 30;
+    public array $backoff = [30, 60, 120];
+
+    /**
+     * Determina el tiempo hasta el cual el job puede ser reintentado.
+     * Después de 8 horas desde que se encola, no se reintenta más.
+     */
+    public function retryUntil(): \DateTime
+    {
+        return now()->addHours(8);
+    }
 
     /**
      * Map de códigos a tablas PostgreSQL.
@@ -106,6 +116,16 @@ final class LoadCsvDataSourcesJob implements ShouldQueue
             return;
         }
 
+        // Verificar si el archivo ya fue importado completamente
+        if ($file->isCompleted()) {
+            Log::info('Archivo CSV ya fue importado, omitiendo', [
+                'file_id' => $this->fileId,
+                'data_source' => $this->dataSourceCode,
+                'completed_at' => $file->import_completed_at,
+            ]);
+            return;
+        }
+
         $runId = $file->collection_notice_run_id;
         $tableName = self::TABLE_MAP[$this->dataSourceCode] ?? null;
 
@@ -113,31 +133,18 @@ final class LoadCsvDataSourcesJob implements ShouldQueue
             throw new RuntimeException("Data source no soportado: {$this->dataSourceCode}");
         }
 
-        Log::info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-        Log::info('🚀 INICIANDO IMPORTACIÓN CSV RESILIENTE');
-        Log::info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-        Log::info('📊 Data Source: ' . $this->dataSourceCode);
-        Log::info('📁 Archivo: ' . basename($file->path));
-        Log::info('💾 Tamaño: ' . round($file->size / 1024 / 1024, 2) . ' MB');
-        Log::info('🎯 Tabla destino: ' . $tableName);
-        Log::info('⚙️  Método: Resilient Line-by-Line (UTF-8 conversion)');
-        Log::info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        // Marcar archivo como en proceso
+        $file->markAsProcessing();
+
+        Log::info('Iniciando importación CSV resiliente', [
+            'data_source' => $this->dataSourceCode,
+            'table' => $tableName,
+            'run_id' => $runId,
+            'file_id' => $this->fileId,
+        ]);
 
         try {
-            // IDEMPOTENCIA: Limpiar tabla antes de insertar para evitar duplicados
-            Log::info('Limpiando tabla CSV para garantizar idempotencia', [
-                'table' => $tableName,
-                'run_id' => $runId,
-            ]);
-
             $deleted = \DB::table($tableName)->where('run_id', $runId)->delete();
-            if ($deleted > 0) {
-                Log::warning('Registros previos eliminados (idempotencia)', [
-                    'table' => $tableName,
-                    'run_id' => $runId,
-                    'deleted_rows' => $deleted,
-                ]);
-            }
 
             $disk = $filesystem->disk('collection');
 
@@ -148,15 +155,6 @@ final class LoadCsvDataSourcesJob implements ShouldQueue
             }
 
             $csvPath = $disk->path($file->path);
-            $fileSize = $disk->size($file->path);
-
-            Log::info('📥 Cargando CSV de forma resiliente', [
-                'run_id' => $runId,
-                'data_source' => $this->dataSourceCode,
-                'table' => $tableName,
-                'file_path' => $file->path,
-                'size_mb' => round($fileSize / 1024 / 1024, 2),
-            ]);
 
             // Leer el header del CSV para obtener las columnas reales
             // (NO usar todas las columnas de la DB, porque algunas se añaden en pasos posteriores)
@@ -180,12 +178,6 @@ final class LoadCsvDataSourcesJob implements ShouldQueue
                 return !empty($trimmed) ? $trimmed : 'col_' . ($index + 1);
             }, $columns, array_keys($columns));
 
-            Log::info('Columnas leídas del CSV header', [
-                'data_source' => $this->dataSourceCode,
-                'columns_count' => count($columns),
-                'columns' => implode(', ', $columns),
-            ]);
-
             // Usar ResilientCsvImporter (procesa línea por línea con chunks)
             $result = $importer->importFromFile(
                 $tableName,
@@ -197,23 +189,21 @@ final class LoadCsvDataSourcesJob implements ShouldQueue
                 true // hasHeader
             );
 
-            Log::info('');
-            Log::info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-            Log::info('🎉 IMPORTACIÓN CSV RESILIENTE COMPLETADA');
-            Log::info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-            Log::info('📊 Data Source: ' . $this->dataSourceCode);
-            Log::info('📈 Total de filas: ' . number_format($result['total_rows']));
-            Log::info('✅ Filas exitosas: ' . number_format($result['success_rows']));
-            Log::info('❌ Filas con error: ' . number_format($result['error_rows']));
-            Log::info('📋 Errores registrados: ' . number_format($result['errors_logged']));
-            Log::info('⏱️  Duración: ' . round($result['duration_ms'] / 1000, 2) . 's');
-            Log::info('📊 Tasa de éxito: ' . ($result['total_rows'] > 0
-                ? round(($result['success_rows'] / $result['total_rows']) * 100, 2)
-                : 100) . '%');
-            Log::info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-            Log::info('');
+            // Marcar archivo como completado exitosamente
+            $file->markAsCompleted();
+
+            Log::info('Importación CSV resiliente completada', [
+                'data_source' => $this->dataSourceCode,
+                'run_id' => $runId,
+                'file_id' => $this->fileId,
+                'rows_imported' => $result['rows_imported'] ?? 0,
+                'rows_with_errors' => $result['rows_with_errors'] ?? 0,
+            ]);
 
         } catch (Throwable $exception) {
+            // Marcar archivo como fallido
+            $file->markAsFailed($exception->getMessage());
+
             Log::error('Error en carga resiliente de archivo CSV', [
                 'job' => self::class,
                 'file_id' => $this->fileId,

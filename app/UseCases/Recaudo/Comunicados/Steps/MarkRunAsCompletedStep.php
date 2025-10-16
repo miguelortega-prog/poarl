@@ -22,33 +22,19 @@ final class MarkRunAsCompletedStep implements ProcessingStepInterface
 
     public function execute(CollectionNoticeRun $run): void
     {
-        $startTime = microtime(true);
+        Log::info('Marcando run como completado', ['run_id' => $run->id]);
 
-        Log::info('✅ Marcando run como completado', [
-            'step' => self::class,
-            'run_id' => $run->id,
-        ]);
-
-        // Calcular duración total (desde started_at hasta ahora)
         $durationMs = null;
         if ($run->started_at) {
             $durationMs = (int) ($run->started_at->diffInMilliseconds(now()));
         }
 
-        // Actualizar run a estado completed
         $run->update([
             'status' => 'completed',
             'completed_at' => now(),
             'duration_ms' => $durationMs,
         ]);
 
-        $duration = (int) ((microtime(true) - $startTime) * 1000);
-
-        Log::info('✅ Run marcado como completado', [
-            'run_id' => $run->id,
-            'total_duration_ms' => $durationMs,
-            'total_duration_minutes' => $durationMs ? round($durationMs / 60000, 2) : null,
-            'step_duration_ms' => $duration,
-        ]);
+        Log::info('Run marcado como completado', ['run_id' => $run->id]);
     }
 }

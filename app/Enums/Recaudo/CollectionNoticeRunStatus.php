@@ -39,13 +39,13 @@ enum CollectionNoticeRunStatus: string
     {
         return match ($this) {
             self::PENDING => 'bg-gray-500 text-white',
-            self::VALIDATING => 'bg-secondary-600 text-primary-900',
-            self::VALIDATION_FAILED => 'bg-danger text-white',
-            self::VALIDATED => 'bg-gray-500 text-white',
-            self::PROCESSING => 'bg-info-900 text-white',
+            self::VALIDATING => 'bg-secondary-900 text-primary-900',
+            self::VALIDATED => 'bg-blue-600 text-white',
+            self::PROCESSING => 'bg-secondary-900 text-primary-900',
             self::COMPLETED => 'bg-primary-900 text-white',
-            self::FAILED => 'bg-danger text-white',
-            self::CANCELLED => 'bg-danger text-white',
+            self::FAILED => 'bg-red-600 text-white',
+            self::CANCELLED => 'bg-red-600 text-white',
+            self::VALIDATION_FAILED => 'bg-red-600 text-white',
         };
     }
 }

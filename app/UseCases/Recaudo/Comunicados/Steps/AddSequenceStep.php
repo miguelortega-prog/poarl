@@ -33,55 +33,12 @@ final class AddSequenceStep implements ProcessingStepInterface
 
     public function execute(CollectionNoticeRun $run): void
     {
-        $startTime = microtime(true);
+        Log::info('Generando consecutivos', ['run_id' => $run->id]);
 
-        Log::info('🔢 Generando consecutivos para BASCAR', [
-            'step' => self::class,
-            'run_id' => $run->id,
-        ]);
+        // Nota: La columna consecutivo ya fue creada por CreateBascarIndexesStep (paso 2)
+        $this->generateConsecutivos($run);
 
-        // Agregar columna consecutivo si no existe
-        $this->ensureConsecutivoColumnExists($run);
-
-        // Generar consecutivos
-        $updatedCount = $this->generateConsecutivos($run);
-
-        $duration = (int) ((microtime(true) - $startTime) * 1000);
-
-        Log::info('✅ Consecutivos generados en BASCAR', [
-            'run_id' => $run->id,
-            'records_updated' => $updatedCount,
-            'duration_ms' => $duration,
-        ]);
-    }
-
-    /**
-     * Asegura que la columna consecutivo exista en data_source_bascar.
-     */
-    private function ensureConsecutivoColumnExists(CollectionNoticeRun $run): void
-    {
-        // Verificar si la columna ya existe
-        $exists = DB::selectOne("
-            SELECT COUNT(*) as count
-            FROM information_schema.columns
-            WHERE table_name = 'data_source_bascar'
-                AND column_name = 'consecutivo'
-        ")->count > 0;
-
-        if (!$exists) {
-            DB::statement("
-                ALTER TABLE data_source_bascar
-                ADD COLUMN consecutivo VARCHAR(100) NULL
-            ");
-
-            Log::info('Columna consecutivo creada en data_source_bascar', [
-                'run_id' => $run->id,
-            ]);
-        } else {
-            Log::debug('Columna consecutivo ya existe en data_source_bascar', [
-                'run_id' => $run->id,
-            ]);
-        }
+        Log::info('Consecutivos generados', ['run_id' => $run->id]);
     }
 
     /**
@@ -89,15 +46,9 @@ final class AddSequenceStep implements ProcessingStepInterface
      *
      * Formato: CON-{IDENT_ASEGURADO}-{NUM_TOMADOR}-{YYYYMMDD}-{SECUENCIA}
      */
-    private function generateConsecutivos(CollectionNoticeRun $run): int
+    private function generateConsecutivos(CollectionNoticeRun $run): void
     {
-        Log::info('Generando consecutivos con formato CON-IDENT-TOMADOR-FECHA-SECUENCIA', [
-            'run_id' => $run->id,
-        ]);
-
-        // Usar UPDATE con subconsulta para generar consecutivos con ROW_NUMBER()
-        // ROW_NUMBER() genera secuencia 1, 2, 3... ordenado por id
-        $updated = DB::update("
+        DB::update("
             UPDATE data_source_bascar
             SET consecutivo = subquery.consecutivo
             FROM (
@@ -106,9 +57,9 @@ final class AddSequenceStep implements ProcessingStepInterface
                     CONCAT(
                         'CON',
                         '-',
-                        COALESCE(IDENT_ASEGURADO, ''),
+                        COALESCE(ident_asegurado, ''),
                         '-',
-                        COALESCE(NUM_TOMADOR, ''),
+                        COALESCE(num_tomador, ''),
                         '-',
                         TO_CHAR(NOW(), 'YYYYMMDD'),
                         '-',
@@ -120,12 +71,5 @@ final class AddSequenceStep implements ProcessingStepInterface
             WHERE data_source_bascar.id = subquery.id
                 AND data_source_bascar.run_id = ?
         ", [$run->id, $run->id]);
-
-        Log::info('✅ Consecutivos generados', [
-            'run_id' => $run->id,
-            'updated_count' => $updated,
-        ]);
-
-        return $updated;
     }
 }

@@ -42,75 +42,13 @@ final class AddDivipolaToBascarStep implements ProcessingStepInterface
 
     public function execute(CollectionNoticeRun $run): void
     {
-        $startTime = microtime(true);
+        Log::info('Agregando DIVIPOLA y dirección válida a BASCAR desde DIR_TOM/CIU_TOM y PAGPLA', ['run_id' => $run->id]);
 
-        Log::info('🗺️  Agregando DIVIPOLA y dirección válida a BASCAR desde DIR_TOM/CIU_TOM y PAGPLA', [
-            'step' => self::class,
-            'run_id' => $run->id,
-        ]);
+        // Nota: Las columnas divipola y direccion ya fueron creadas por CreateBascarIndexesStep (paso 2)
+        $this->copyValidAddressFromDirTomCiuTom($run);
+        $this->populateValidAddressFromPagpla($run);
 
-        // Paso 1: Agregar columnas divipola y direccion si no existen
-        $this->ensureColumnsExist($run);
-
-        // Paso 2: PRIORIDAD 1 - Copiar desde DIR_TOM y CIU_TOM si son válidos
-        $fromDirTom = $this->copyValidAddressFromDirTomCiuTom($run);
-
-        // Paso 3: PRIORIDAD 2 - Completar desde PAGPLA solo registros vacíos
-        $fromPagpla = $this->populateValidAddressFromPagpla($run);
-
-        $duration = (int) ((microtime(true) - $startTime) * 1000);
-
-        Log::info('✅ DIVIPOLA y dirección válida agregados a BASCAR', [
-            'run_id' => $run->id,
-            'from_dir_tom_ciu_tom' => $fromDirTom,
-            'from_pagpla' => $fromPagpla,
-            'total_records_updated' => $fromDirTom + $fromPagpla,
-            'duration_ms' => $duration,
-        ]);
-    }
-
-    /**
-     * Asegura que las columnas divipola y direccion existan en data_source_bascar.
-     */
-    private function ensureColumnsExist(CollectionNoticeRun $run): void
-    {
-        // Verificar si la columna divipola existe
-        $divipolaExists = DB::selectOne("
-            SELECT COUNT(*) as count
-            FROM information_schema.columns
-            WHERE table_name = 'data_source_bascar'
-                AND column_name = 'divipola'
-        ")->count > 0;
-
-        if (!$divipolaExists) {
-            DB::statement("
-                ALTER TABLE data_source_bascar
-                ADD COLUMN divipola VARCHAR(10) NULL
-            ");
-
-            Log::info('Columna divipola creada en data_source_bascar', [
-                'run_id' => $run->id,
-            ]);
-        }
-
-        // Verificar si la columna direccion existe
-        $direccionExists = DB::selectOne("
-            SELECT COUNT(*) as count
-            FROM information_schema.columns
-            WHERE table_name = 'data_source_bascar'
-                AND column_name = 'direccion'
-        ")->count > 0;
-
-        if (!$direccionExists) {
-            DB::statement("
-                ALTER TABLE data_source_bascar
-                ADD COLUMN direccion TEXT NULL
-            ");
-
-            Log::info('Columna direccion creada en data_source_bascar', [
-                'run_id' => $run->id,
-            ]);
-        }
+        Log::info('DIVIPOLA y dirección válida agregados a BASCAR', ['run_id' => $run->id]);
     }
 
     /**
@@ -124,44 +62,27 @@ final class AddDivipolaToBascarStep implements ProcessingStepInterface
      */
     private function copyValidAddressFromDirTomCiuTom(CollectionNoticeRun $run): int
     {
-        Log::info('Copiando DIR_TOM y CIU_TOM válidos a direccion y divipola', [
-            'run_id' => $run->id,
-        ]);
-
         $updated = DB::update("
             UPDATE data_source_bascar
             SET
-                direccion = TRIM(DIR_TOM),
+                direccion = TRIM(dir_tom),
                 divipola = CONCAT(
-                    LPAD(SUBSTRING(CIU_TOM, 1, 2), 2, '0'),
-                    LPAD(SUBSTRING(CIU_TOM, 3), 3, '0')
+                    LPAD(SUBSTRING(ciu_tom, 1, 2), 2, '0'),
+                    LPAD(SUBSTRING(ciu_tom, 3), 3, '0')
                 )
             WHERE run_id = ?
-                -- Validar DIR_TOM (dirección)
-                AND DIR_TOM IS NOT NULL
-                AND DIR_TOM != ''
-                -- Validar que contenga tipo de vía común en Colombia (case-insensitive)
-                AND DIR_TOM ~* '(calle|carrera|diagonal|avenida|transversal|autopista|circular|variante|cl|cr|cra|dg|av|tv|circ|var|krr)'
-                -- Validar que contenga números (característica esencial de dirección)
-                AND DIR_TOM ~ '[0-9]'
-                -- Excluir direcciones específicas prohibidas
-                AND UPPER(TRIM(DIR_TOM)) != 'AV CALLE 26 # 68B 31 TSB'
-                AND UPPER(DIR_TOM) NOT LIKE '%NO DEFINIDA%'
-                -- Validar que tenga al menos longitud mínima razonable (ej: 'CL 1 # 2-3')
-                AND LENGTH(DIR_TOM) >= 7
-                -- Validar CIU_TOM (código ciudad)
-                AND CIU_TOM IS NOT NULL
-                AND CIU_TOM != ''
-                -- Validar que CIU_TOM tenga al menos 3 caracteres (mínimo para dpto + ciudad)
-                AND LENGTH(CIU_TOM) >= 3
-                -- Validar que CIU_TOM contenga solo dígitos
-                AND CIU_TOM ~ '^[0-9]+$'
+                AND dir_tom IS NOT NULL
+                AND dir_tom != ''
+                AND dir_tom ~* '(calle|carrera|diagonal|avenida|transversal|autopista|circular|variante|cl|cr|cra|dg|av|tv|circ|var|krr)'
+                AND dir_tom ~ '[0-9]'
+                AND UPPER(TRIM(dir_tom)) != 'AV CALLE 26 # 68B 31 TSB'
+                AND UPPER(dir_tom) NOT LIKE '%NO DEFINIDA%'
+                AND LENGTH(dir_tom) >= 7
+                AND ciu_tom IS NOT NULL
+                AND ciu_tom != ''
+                AND LENGTH(ciu_tom) >= 3
+                AND ciu_tom ~ '^[0-9]+$'
         ", [$run->id]);
-
-        Log::info('Dirección y DIVIPOLA válidos copiados desde DIR_TOM y CIU_TOM', [
-            'run_id' => $run->id,
-            'updated_count' => $updated,
-        ]);
 
         return $updated;
     }
@@ -176,11 +97,6 @@ final class AddDivipolaToBascarStep implements ProcessingStepInterface
      */
     private function populateValidAddressFromPagpla(CollectionNoticeRun $run): int
     {
-        Log::info('Buscando primera dirección válida desde PAGPLA (solo registros vacíos)', [
-            'run_id' => $run->id,
-        ]);
-
-        // Usar subconsulta para obtener la primera dirección válida por cada NUM_TOMADOR
         $updated = DB::update("
             UPDATE data_source_bascar AS b
             SET
@@ -191,17 +107,13 @@ final class AddDivipolaToBascarStep implements ProcessingStepInterface
                     )
                     FROM data_source_pagpla AS p
                     WHERE p.run_id = ?
-                        AND p.identificacion_aportante = b.NUM_TOMADOR
+                        AND p.identificacion_aportante = b.num_tomador
                         AND p.direccion IS NOT NULL
                         AND p.direccion != ''
-                        -- Validar que contenga tipo de vía común en Colombia (case-insensitive)
                         AND p.direccion ~* '(calle|carrera|diagonal|avenida|transversal|autopista|circular|variante|cl|cr|cra|dg|av|tv|circ|var|krr)'
-                        -- Validar que contenga números (característica esencial de dirección)
                         AND p.direccion ~ '[0-9]'
-                        -- Excluir direcciones específicas prohibidas
                         AND UPPER(TRIM(p.direccion)) != 'AV CALLE 26 # 68B 31 TSB'
                         AND UPPER(p.direccion) NOT LIKE '%NO DEFINIDA%'
-                        -- Validar que tenga al menos longitud mínima razonable (ej: 'CL 1 # 2-3')
                         AND LENGTH(p.direccion) >= 7
                     ORDER BY p.id
                     LIMIT 1
@@ -210,7 +122,7 @@ final class AddDivipolaToBascarStep implements ProcessingStepInterface
                     SELECT TRIM(p.direccion)
                     FROM data_source_pagpla AS p
                     WHERE p.run_id = ?
-                        AND p.identificacion_aportante = b.NUM_TOMADOR
+                        AND p.identificacion_aportante = b.num_tomador
                         AND p.direccion IS NOT NULL
                         AND p.direccion != ''
                         AND p.direccion ~* '(calle|carrera|diagonal|avenida|transversal|autopista|circular|variante|cl|cr|cra|dg|av|tv|circ|var|krr)'
@@ -222,19 +134,13 @@ final class AddDivipolaToBascarStep implements ProcessingStepInterface
                     LIMIT 1
                 )
             WHERE b.run_id = ?
-                AND b.NUM_TOMADOR IS NOT NULL
-                AND b.NUM_TOMADOR != ''
-                -- NUEVO: Solo actualizar registros que quedaron sin direccion o divipola
+                AND b.num_tomador IS NOT NULL
+                AND b.num_tomador != ''
                 AND (
                     (b.direccion IS NULL OR b.direccion = '')
                     OR (b.divipola IS NULL OR b.divipola = '')
                 )
         ", [$run->id, $run->id, $run->id]);
-
-        Log::info('DIVIPOLA y dirección válida poblados desde PAGPLA', [
-            'run_id' => $run->id,
-            'updated_count' => $updated,
-        ]);
 
         return $updated;
     }

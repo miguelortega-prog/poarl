@@ -36,26 +36,11 @@ final class RemoveCrossedBascarRecordsStep implements ProcessingStepInterface
 
     public function execute(CollectionNoticeRun $run): void
     {
-        $startTime = microtime(true);
         $tableName = 'data_source_bascar';
 
-        Log::info('🗑️  Eliminando de BASCAR registros que cruzaron con PAGAPL', [
-            'step' => self::class,
-            'run_id' => $run->id,
-        ]);
+        Log::info('Eliminando registros de BASCAR que cruzaron con PAGAPL', ['run_id' => $run->id]);
 
-        // Contar registros antes de la eliminación
-        $countBefore = DB::table($tableName)
-            ->where('run_id', $run->id)
-            ->count();
-
-        Log::info('Registros en BASCAR antes de eliminar', [
-            'run_id' => $run->id,
-            'count_before' => $countBefore,
-        ]);
-
-        // Eliminar registros que tienen composite_key en PAGAPL
-        $deleted = DB::delete("
+        DB::delete("
             DELETE FROM {$tableName}
             WHERE run_id = ?
                 AND EXISTS (
@@ -66,38 +51,6 @@ final class RemoveCrossedBascarRecordsStep implements ProcessingStepInterface
                 )
         ", [$run->id, $run->id]);
 
-        // Contar registros después de la eliminación
-        $countAfter = DB::table($tableName)
-            ->where('run_id', $run->id)
-            ->count();
-
-        $duration = (int) ((microtime(true) - $startTime) * 1000);
-
-        Log::info('✅ Registros eliminados de BASCAR', [
-            'run_id' => $run->id,
-            'count_before' => $countBefore,
-            'deleted' => $deleted,
-            'count_after' => $countAfter,
-            'duration_ms' => $duration,
-        ]);
-
-        // Validar consistencia
-        if ($countBefore - $deleted !== $countAfter) {
-            Log::warning('⚠️  Inconsistencia en conteo de eliminación', [
-                'run_id' => $run->id,
-                'count_before' => $countBefore,
-                'deleted' => $deleted,
-                'count_after' => $countAfter,
-                'expected_after' => $countBefore - $deleted,
-            ]);
-        }
-
-        // Validar que quedaron registros para procesar
-        if ($countAfter === 0) {
-            Log::warning('⚠️  No quedaron registros en BASCAR después de eliminar cruzados', [
-                'run_id' => $run->id,
-                'deleted' => $deleted,
-            ]);
-        }
+        Log::info('Registros eliminados de BASCAR', ['run_id' => $run->id]);
     }
 }
