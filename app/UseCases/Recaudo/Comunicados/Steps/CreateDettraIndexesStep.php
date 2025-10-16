@@ -27,6 +27,7 @@ use Illuminate\Support\Facades\Log;
  * - observacion_trabajadores: Observaciones resultantes de cruces (TEXT)
  * - nombres: Nombre completo del trabajador (desde BASACT)
  * - codigo_ciudad: Código DIVIPOLA (cod_depto_empresa + cod_ciudad_empresa)
+ * - nombre_ciudad: Nombre de la ciudad (desde city_depto)
  * - correo: Correo electrónico del trabajador
  * - direccion: Dirección del trabajador
  * - tipo_de_envio: Tipo de envío del comunicado (CORREO o FISICO)
@@ -39,6 +40,7 @@ use Illuminate\Support\Facades\Log;
  * - idx_dettra_composite_key: Optimiza cruces con llaves compuestas
  * - idx_dettra_tipo_cotizante: Optimiza filtros por tipo de cotizante
  * - idx_dettra_run_tipo_cotizante: Optimiza filtros combinados
+ * - idx_dettra_codigo_ciudad: Optimiza búsqueda de nombres de ciudad
  */
 final class CreateDettraIndexesStep implements ProcessingStepInterface
 {
@@ -86,6 +88,7 @@ final class CreateDettraIndexesStep implements ProcessingStepInterface
 
         // Columnas para datos de ubicación y contacto
         $this->addColumnIfNotExists($tableName, 'codigo_ciudad', 'VARCHAR(10)');
+        $this->addColumnIfNotExists($tableName, 'nombre_ciudad', 'VARCHAR(255)');
         $this->addColumnIfNotExists($tableName, 'correo', 'VARCHAR(255)');
         $this->addColumnIfNotExists($tableName, 'direccion', 'VARCHAR(500)');
 
@@ -105,6 +108,7 @@ final class CreateDettraIndexesStep implements ProcessingStepInterface
         $this->createIndexIfNotExists($tableName, 'idx_dettra_composite_key', 'composite_key');
         $this->createIndexIfNotExists($tableName, 'idx_dettra_tipo_cotizante', 'tipo_cotizante');
         $this->createIndexIfNotExists($tableName, 'idx_dettra_run_tipo_cotizante', 'run_id, tipo_cotizante');
+        $this->createIndexIfNotExists($tableName, 'idx_dettra_codigo_ciudad', 'codigo_ciudad');
     }
 
     /**

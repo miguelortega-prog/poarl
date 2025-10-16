@@ -19,11 +19,11 @@ return [
         'constitucion_mora_aportantes' => \App\UseCases\Recaudo\Comunicados\Processors\ConstitucionMoraAportantesProcessor::class,
         'constitucion_mora_independientes' => \App\UseCases\Recaudo\Comunicados\Processors\ConstitucionMoraIndependientesProcessor::class,
 
-        // Avisos de incumplimiento (implementado como ejemplo)
+        // Avisos de incumplimiento
         'aviso_incumplimiento_estados_cuenta' => \App\UseCases\Recaudo\Comunicados\Processors\AvisoIncumplimientoEstadosCuentaProcessor::class,
+        'aviso_incumplimiento_aportantes' => \App\UseCases\Recaudo\Comunicados\Processors\AvisoIncumplimientoAportantesProcessor::class,
 
         // TODO: Implementar los demás procesadores según se necesiten
-        // 'aviso_incumplimiento_aportantes' => \App\UseCases\Recaudo\Comunicados\Processors\AvisoIncumplimientoAportantesProcessor::class,
         // 'aviso_incumplimiento_inconsistencias' => \App\UseCases\Recaudo\Comunicados\Processors\AvisoIncumplimientoInconsistenciasProcessor::class,
         // 'aviso_incumplimiento_independientes' => \App\UseCases\Recaudo\Comunicados\Processors\AvisoIncumplimientoIndependientesProcessor::class,
         // 'aviso_ministerio_aportantes' => \App\UseCases\Recaudo\Comunicados\Processors\AvisoMinisterioAportantesProcessor::class,

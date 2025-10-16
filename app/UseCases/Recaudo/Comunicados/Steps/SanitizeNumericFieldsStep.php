@@ -56,6 +56,12 @@ final class SanitizeNumericFieldsStep implements ProcessingStepInterface
     /**
      * Sanitiza campos numéricos de una tabla específica.
      *
+     * Procesa registros por chunks para:
+     * - Validar cada valor individualmente
+     * - Convertir formato europeo a estándar
+     * - Manejar errores de conversión
+     * - Actualizar BD con valores limpios
+     *
      * @param string $tableName Nombre de la tabla
      * @param array<string> $columns Lista de columnas a sanitizar
      * @param CollectionNoticeRun $run Run actual
@@ -68,18 +74,92 @@ final class SanitizeNumericFieldsStep implements ProcessingStepInterface
             return;
         }
 
-        // Construir SET clause dinámicamente para todas las columnas
-        $setClauses = array_map(function ($column) {
-            return "{$column} = REPLACE(REPLACE({$column}, '.', ''), ',', '.')";
-        }, $columns);
+        $chunkSize = 1000;
+        $processed = 0;
+        $errors = 0;
 
-        $setClause = implode(', ', $setClauses);
+        DB::table($tableName)
+            ->where('run_id', $run->id)
+            ->orderBy('id')
+            ->chunk($chunkSize, function ($records) use ($tableName, $columns, &$processed, &$errors) {
+                foreach ($records as $record) {
+                    $updates = [];
 
-        // Ejecutar UPDATE masivo
-        DB::update("
-            UPDATE {$tableName}
-            SET {$setClause}
-            WHERE run_id = ?
-        ", [$run->id]);
+                    foreach ($columns as $column) {
+                        $originalValue = $record->{$column} ?? null;
+
+                        if ($originalValue === null || trim($originalValue) === '') {
+                            continue;
+                        }
+
+                        // Sanitizar valor: eliminar espacios, puntos (miles), convertir coma a punto (decimal)
+                        $sanitized = $this->sanitizeNumericValue($originalValue);
+
+                        // Validar que el resultado sea numérico válido
+                        if ($sanitized !== null && $sanitized !== $originalValue) {
+                            $updates[$column] = $sanitized;
+                        } elseif ($sanitized === null) {
+                            $errors++;
+                            Log::warning('Valor numérico inválido', [
+                                'table' => $tableName,
+                                'record_id' => $record->id,
+                                'column' => $column,
+                                'original_value' => $originalValue,
+                            ]);
+                        }
+                    }
+
+                    // Actualizar registro si hay cambios
+                    if (!empty($updates)) {
+                        DB::table($tableName)
+                            ->where('id', $record->id)
+                            ->update($updates);
+                    }
+
+                    $processed++;
+                }
+            });
+
+        Log::info('Sanitización de campos numéricos en tabla completada', [
+            'table' => $tableName,
+            'columns' => $columns,
+            'processed' => $processed,
+            'errors' => $errors,
+        ]);
+    }
+
+    /**
+     * Sanitiza un valor numérico individual.
+     *
+     * En los datos, tanto el punto (.) como la coma (,) son separadores de miles.
+     * NO hay valores decimales.
+     *
+     * Conversión:
+     * - " 1.234.567 " → "1234567"
+     * - "14,861" → "14861"
+     * - "2,835,609" → "2835609"
+     * - "  100  " → "100"
+     *
+     * @param string $value Valor original
+     * @return string|null Valor sanitizado o null si es inválido
+     */
+    private function sanitizeNumericValue(string $value): ?string
+    {
+        // 1. Eliminar espacios al inicio y final
+        $cleaned = trim($value);
+
+        if ($cleaned === '') {
+            return null;
+        }
+
+        // 2. Eliminar TODOS los separadores (punto y coma son separadores de miles)
+        $cleaned = str_replace(['.', ','], '', $cleaned);
+
+        // 3. Validar que sea numérico entero
+        if (!is_numeric($cleaned)) {
+            return null;
+        }
+
+        return $cleaned;
     }
 }

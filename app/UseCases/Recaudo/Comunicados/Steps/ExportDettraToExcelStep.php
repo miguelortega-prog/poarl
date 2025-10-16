@@ -16,10 +16,13 @@ use PhpOffice\PhpSpreadsheet\Writer\Xls;
 /**
  * Step: Exportar DETTRA a Excel 97 (.xls).
  *
- * Genera archivos Excel 97 (.xls) con 2 hojas para trabajadores independientes:
+ * Genera 2 archivos Excel 97 (.xls) separados por tipo_cotizante:
+ * - Archivo 1: tipo_cotizante = '16' (Tipo especial)
+ * - Archivo 2: tipo_cotizante != '16' (Tipos regulares: 3, 59, etc.)
  *
- * Hoja 1 (Independientes): Data de DETTRA con campos específicos del trabajador
- * Hoja 2 (Pendiente): Información adicional que se indicará
+ * Cada archivo tiene 2 hojas:
+ * - Hoja 1 (Independientes): Data de DETTRA con campos específicos del trabajador
+ * - Hoja 2 (Trabajadores Expuestos): Detalle con riesgo en números romanos
  *
  * Límite Excel 97: 65,536 filas por hoja (65,535 datos + 1 encabezado)
  * Si se supera el límite, crea archivos adicionales (_parte2, _parte3, etc.)
@@ -31,7 +34,9 @@ use PhpOffice\PhpSpreadsheet\Writer\Xls;
  * - Riesgo 4: 4.35%
  * - Riesgo 5: 6.96%
  *
- * Nombre: Constitucion_en_mora_independientes_{{periodo}}.xls
+ * Nombres:
+ * - Constitucion_en_mora_independientes_tipo16_{{periodo}}.xls
+ * - Constitucion_en_mora_independientes_{{periodo}}.xls
  */
 final class ExportDettraToExcelStep implements ProcessingStepInterface
 {
@@ -60,60 +65,127 @@ final class ExportDettraToExcelStep implements ProcessingStepInterface
     {
         Log::info('Exportando DETTRA a Excel', ['run_id' => $run->id]);
 
-        $dettraCount = $this->countDettraRecords($run);
+        // Contar registros por tipo_cotizante
+        $countTipo16 = $this->countDettraRecordsByTipo($run, '16');
+        $countOtros = $this->countDettraRecordsByTipo($run, 'otros');
 
-        if ($dettraCount === 0) {
+        $totalRecords = $countTipo16 + $countOtros;
+
+        if ($totalRecords === 0) {
             Log::warning('No hay registros en DETTRA para exportar', ['run_id' => $run->id]);
             return;
         }
 
-        $filesNeeded = max(
-            (int) ceil($dettraCount / self::MAX_ROWS_PER_SHEET),
-            1
-        );
+        Log::info('Registros DETTRA por tipo_cotizante', [
+            'run_id' => $run->id,
+            'tipo_16' => $countTipo16,
+            'otros_tipos' => $countOtros,
+            'total' => $totalRecords,
+        ]);
 
-        for ($fileIndex = 1; $fileIndex <= $filesNeeded; $fileIndex++) {
-            $this->generateExcelFile($run, $fileIndex, $filesNeeded, $dettraCount);
+        $totalFilesGenerated = 0;
+
+        // Generar archivos para tipo_cotizante = '16'
+        if ($countTipo16 > 0) {
+            $filesNeededTipo16 = max(
+                (int) ceil($countTipo16 / self::MAX_ROWS_PER_SHEET),
+                1
+            );
+
+            for ($fileIndex = 1; $fileIndex <= $filesNeededTipo16; $fileIndex++) {
+                $this->generateExcelFile($run, $fileIndex, $filesNeededTipo16, '16');
+                $totalFilesGenerated++;
+            }
+
+            Log::info('Archivos tipo_cotizante=16 generados', [
+                'run_id' => $run->id,
+                'registros' => $countTipo16,
+                'archivos' => $filesNeededTipo16,
+            ]);
+        }
+
+        // Generar archivos para tipo_cotizante != '16'
+        if ($countOtros > 0) {
+            $filesNeededOtros = max(
+                (int) ceil($countOtros / self::MAX_ROWS_PER_SHEET),
+                1
+            );
+
+            for ($fileIndex = 1; $fileIndex <= $filesNeededOtros; $fileIndex++) {
+                $this->generateExcelFile($run, $fileIndex, $filesNeededOtros, 'otros');
+                $totalFilesGenerated++;
+            }
+
+            Log::info('Archivos tipo_cotizante!=16 generados', [
+                'run_id' => $run->id,
+                'registros' => $countOtros,
+                'archivos' => $filesNeededOtros,
+            ]);
         }
 
         Log::info('Exportación DETTRA a Excel completada', [
             'run_id' => $run->id,
-            'total_registros' => $dettraCount,
-            'archivos_generados' => $filesNeeded,
+            'total_registros' => $totalRecords,
+            'archivos_generados' => $totalFilesGenerated,
         ]);
     }
 
     /**
-     * Cuenta registros de DETTRA.
+     * Cuenta registros de DETTRA por tipo_cotizante.
+     *
+     * @param CollectionNoticeRun $run
+     * @param string $tipoCotizante '16' para tipo especial, 'otros' para el resto
+     * @return int
      */
-    private function countDettraRecords(CollectionNoticeRun $run): int
+    private function countDettraRecordsByTipo(CollectionNoticeRun $run, string $tipoCotizante): int
     {
+        if ($tipoCotizante === '16') {
+            return (int) DB::selectOne("
+                SELECT COUNT(*) as count
+                FROM data_source_dettra
+                WHERE run_id = ?
+                    AND tipo_cotizante = '16'
+            ", [$run->id])->count;
+        }
+
+        // Para 'otros', contar todos excepto tipo_cotizante = '16'
         return (int) DB::selectOne("
             SELECT COUNT(*) as count
             FROM data_source_dettra
             WHERE run_id = ?
+                AND (tipo_cotizante IS NULL OR tipo_cotizante != '16')
         ", [$run->id])->count;
     }
 
     /**
      * Genera un archivo Excel.
+     *
+     * @param CollectionNoticeRun $run
+     * @param int $fileIndex Índice del archivo (para paginación)
+     * @param int $totalFiles Total de archivos a generar para este tipo
+     * @param string $tipoCotizante '16' o 'otros'
      */
     private function generateExcelFile(
         CollectionNoticeRun $run,
         int $fileIndex,
         int $totalFiles,
-        int $dettraCount
+        string $tipoCotizante
     ): void {
         $spreadsheet = new Spreadsheet();
-        $this->generateSheet1($spreadsheet, $run, $fileIndex);
-        $this->generateSheet2($spreadsheet, $run, $fileIndex);
-        $this->saveExcelFile($spreadsheet, $run, $fileIndex, $totalFiles);
+        $this->generateSheet1($spreadsheet, $run, $fileIndex, $tipoCotizante);
+        $this->generateSheet2($spreadsheet, $run, $fileIndex, $tipoCotizante);
+        $this->saveExcelFile($spreadsheet, $run, $fileIndex, $totalFiles, $tipoCotizante);
     }
 
     /**
      * Genera Hoja 1 (Independientes) con data de DETTRA.
+     *
+     * @param Spreadsheet $spreadsheet
+     * @param CollectionNoticeRun $run
+     * @param int $fileIndex
+     * @param string $tipoCotizante '16' o 'otros'
      */
-    private function generateSheet1(Spreadsheet $spreadsheet, CollectionNoticeRun $run, int $fileIndex): void
+    private function generateSheet1(Spreadsheet $spreadsheet, CollectionNoticeRun $run, int $fileIndex, string $tipoCotizante): void
     {
         $sheet = $spreadsheet->getActiveSheet();
         $sheet->setTitle('Independientes');
@@ -149,6 +221,11 @@ final class ExportDettraToExcelStep implements ProcessingStepInterface
         $periodoAnio = substr($run->period ?? '', 0, 4);
         $periodoMes = substr($run->period ?? '', 4, 2);
 
+        // Construir filtro WHERE según tipo_cotizante
+        $whereClause = $tipoCotizante === '16'
+            ? "d.run_id = ? AND d.tipo_cotizante = '16'"
+            : "d.run_id = ? AND (d.tipo_cotizante IS NULL OR d.tipo_cotizante != '16')";
+
         // Obtener data de DETTRA
         $dettraData = DB::select("
             SELECT
@@ -159,7 +236,7 @@ final class ExportDettraToExcelStep implements ProcessingStepInterface
                 d.nombres as nombre_empresa,
                 'CONTRATISTA INDEPENDIENTE' as cargo,
                 d.direccion,
-                d.codigo_ciudad as ciudad,
+                d.nombre_ciudad as ciudad,
                 d.num_poli as contrato,
                 ? as anio1,
                 ? as mes1,
@@ -177,7 +254,7 @@ final class ExportDettraToExcelStep implements ProcessingStepInterface
                 d.codigo_ciudad as cod_ciudad
             FROM data_source_dettra d
             INNER JOIN collection_notice_runs r ON d.run_id = r.id
-            WHERE d.run_id = ?
+            WHERE {$whereClause}
             ORDER BY d.id
             LIMIT ? OFFSET ?
         ", [
@@ -233,8 +310,13 @@ final class ExportDettraToExcelStep implements ProcessingStepInterface
      * - 3 → III
      * - 4 → IV
      * - 5 → V
+     *
+     * @param Spreadsheet $spreadsheet
+     * @param CollectionNoticeRun $run
+     * @param int $fileIndex
+     * @param string $tipoCotizante '16' o 'otros'
      */
-    private function generateSheet2(Spreadsheet $spreadsheet, CollectionNoticeRun $run, int $fileIndex): void
+    private function generateSheet2(Spreadsheet $spreadsheet, CollectionNoticeRun $run, int $fileIndex, string $tipoCotizante): void
     {
         $sheet = $spreadsheet->createSheet();
         $sheet->setTitle('Trabajadores Expuestos');
@@ -267,6 +349,11 @@ final class ExportDettraToExcelStep implements ProcessingStepInterface
         $periodoAnio = substr($run->period ?? '', 0, 4);
         $periodoMes = substr($run->period ?? '', 4, 2);
 
+        // Construir filtro WHERE según tipo_cotizante
+        $whereClause = $tipoCotizante === '16'
+            ? "d.run_id = ? AND d.tipo_cotizante = '16'"
+            : "d.run_id = ? AND (d.tipo_cotizante IS NULL OR d.tipo_cotizante != '16')";
+
         // Obtener data de DETTRA
         $dettraData = DB::select("
             SELECT
@@ -298,7 +385,7 @@ final class ExportDettraToExcelStep implements ProcessingStepInterface
                 'NO REGISTRA' as fch_fin,
                 1 as trab_expuestos
             FROM data_source_dettra d
-            WHERE d.run_id = ?
+            WHERE {$whereClause}
             ORDER BY d.id
             LIMIT ? OFFSET ?
         ", [
@@ -344,15 +431,27 @@ final class ExportDettraToExcelStep implements ProcessingStepInterface
 
     /**
      * Guarda el archivo Excel 97 (.xls).
+     *
+     * @param Spreadsheet $spreadsheet
+     * @param CollectionNoticeRun $run
+     * @param int $fileIndex
+     * @param int $totalFiles
+     * @param string $tipoCotizante '16' o 'otros'
+     * @return string
      */
     private function saveExcelFile(
         Spreadsheet $spreadsheet,
         CollectionNoticeRun $run,
         int $fileIndex,
-        int $totalFiles
+        int $totalFiles,
+        string $tipoCotizante
     ): string {
-        // Nombre del archivo con periodo
-        $baseName = sprintf('Constitucion_en_mora_independientes_%s', $run->period);
+        // Nombre del archivo con periodo y tipo_cotizante
+        if ($tipoCotizante === '16') {
+            $baseName = sprintf('Constitucion_en_mora_independientes_tipo16_%s', $run->period);
+        } else {
+            $baseName = sprintf('Constitucion_en_mora_independientes_%s', $run->period);
+        }
 
         // Agregar sufijo si hay múltiples archivos
         if ($totalFiles > 1) {
@@ -391,14 +490,26 @@ final class ExportDettraToExcelStep implements ProcessingStepInterface
 
         $fileSize = $disk->size($relativePath);
 
-        // Contar registros en DETTRA para este archivo
-        $offset = ($fileIndex - 1) * self::MAX_ROWS_PER_SHEET;
-        $recordsCount = (int) DB::selectOne("
-            SELECT COUNT(*) as count
-            FROM data_source_dettra
-            WHERE run_id = ?
-            LIMIT ? OFFSET ?
-        ", [$run->id, self::MAX_ROWS_PER_SHEET, $offset])->count;
+        // Contar registros en DETTRA para este archivo filtrando por tipo_cotizante
+        $offsetCalc = ($fileIndex - 1) * self::MAX_ROWS_PER_SHEET;
+
+        if ($tipoCotizante === '16') {
+            $recordsCount = (int) DB::selectOne("
+                SELECT COUNT(*) as count
+                FROM data_source_dettra
+                WHERE run_id = ?
+                    AND tipo_cotizante = '16'
+                LIMIT ? OFFSET ?
+            ", [$run->id, self::MAX_ROWS_PER_SHEET, $offsetCalc])->count;
+        } else {
+            $recordsCount = (int) DB::selectOne("
+                SELECT COUNT(*) as count
+                FROM data_source_dettra
+                WHERE run_id = ?
+                    AND (tipo_cotizante IS NULL OR tipo_cotizante != '16')
+                LIMIT ? OFFSET ?
+            ", [$run->id, self::MAX_ROWS_PER_SHEET, $offsetCalc])->count;
+        }
 
         // Registrar en BD
         CollectionNoticeRunResultFile::create([
@@ -417,6 +528,7 @@ final class ExportDettraToExcelStep implements ProcessingStepInterface
                 'file_index' => $fileIndex,
                 'total_files' => $totalFiles,
                 'periodo' => $run->period,
+                'tipo_cotizante' => $tipoCotizante,
             ],
         ]);
 

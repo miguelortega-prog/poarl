@@ -26,6 +26,7 @@ use App\UseCases\Recaudo\Comunicados\Steps\GenerateBascarCompositeKeyStep;
 use App\UseCases\Recaudo\Comunicados\Steps\GeneratePagaplCompositeKeyStep;
 use App\UseCases\Recaudo\Comunicados\Steps\IdentifyPsiStep;
 use App\UseCases\Recaudo\Comunicados\Steps\MarkRunAsCompletedStep;
+use App\UseCases\Recaudo\Comunicados\Steps\NormalizeDateFormatsStep;
 use App\UseCases\Recaudo\Comunicados\Steps\RemoveCrossedBascarRecordsStep;
 use App\UseCases\Recaudo\Comunicados\Steps\SanitizeCiuTomStep;
 use App\UseCases\Recaudo\Comunicados\Steps\SanitizeNumericFieldsStep;
@@ -61,6 +62,7 @@ final class ConstitucionMoraAportantesProcessor extends BaseCollectionNoticeProc
         private readonly SanitizeNumericFieldsStep $sanitizeNumericFieldsStep,
         private readonly SanitizeCiuTomStep $sanitizeCiuTomStep,
         private readonly CreateBascarIndexesStep $createBascarIndexesStep,
+        private readonly NormalizeDateFormatsStep $normalizeDateFormatsStep,
         private readonly FilterDataByPeriodStep $filterDataByPeriodStep,
         private readonly GenerateBascarCompositeKeyStep $generateBascarKeysStep,
         private readonly GeneratePagaplCompositeKeyStep $generatePagaplKeysStep,
@@ -122,15 +124,17 @@ final class ConstitucionMoraAportantesProcessor extends BaseCollectionNoticeProc
      * Define los pasos del pipeline para este procesador.
      *
      * IMPORTANTE: Los datos ya fueron cargados por los jobs previos:
-     * - LoadCsvDataSourcesJob: cargó BASCAR, BAPRPO, DATPOL
-     * - LoadExcelWithCopyJob (x3): convirtió Excel a CSV y cargó DETTRA, PAGAPL, PAGPLA
-     *   (El binario Go excel_to_csv ya convierte fechas a formato DD/MM/YYYY)
+     * - LoadExcelWithCopyJob: convirtió Excel a CSV y cargó BASCAR, DETTRA, PAGAPL, PAGPLA
+     *   (El binario Go excel_to_csv RESPETA el formato original del Excel)
+     *   (Las fechas deben venir con año de 4 dígitos: D/M/YYYY o DD/MM/YYYY)
+     * - LoadCsvDataSourcesJob: cargó BAPRPO, DATPOL
      *
      * Este procesador SOLO realiza:
      * - PASO 1: Validar que los datos se cargaron correctamente
-     * - PASO 2: Sanitizar campos numéricos (formato europeo → estándar)
-     * - PASO 3: Sanitizar CIU_TOM (convertir nombres de ciudades a códigos)
-     * - PASOS 4+: Transformaciones SQL (filtros, cruces, generación de archivos)
+     * - PASO 2: Preparar estructura BASCAR (columnas e índices)
+     * - PASO 3: Sanitizar campos numéricos (formato europeo → estándar)
+     * - PASO 4: Sanitizar CIU_TOM (convertir nombres de ciudades a códigos)
+     * - PASOS 5+: Filtrado por periodo y transformaciones SQL
      *
      * @return array<int, \App\Contracts\Recaudo\Comunicados\ProcessingStepInterface>
      */
@@ -156,12 +160,27 @@ final class ConstitucionMoraAportantesProcessor extends BaseCollectionNoticeProc
 
             // === FASE 2: SANITIZACIÓN DE DATOS ===
 
-            // Paso 3: Sanitizar campos numéricos (formato europeo → estándar)
-            // Limpia campos numéricos que vienen con separadores europeos:
-            // - Entrada: "1.234.567,89" (punto = miles, coma = decimal)
-            // - Salida: "1234567.89" (sin separador de miles, punto = decimal)
-            // Actualmente sanitiza: BASCAR.valor_total_fact
-            $this->sanitizeNumericFieldsStep,
+            // Paso 2.5: Normalizar formatos de fechas desde Excel
+            // PROBLEMA: La librería excelize de Go formatea automáticamente las fechas de Excel a formato MM-DD-YY.
+            // - Excel guarda fechas como números seriales
+            // - excelize las convierte a texto pero usa formato estadounidense con año corto
+            // - Ejemplo: 6/01/2024 → 09-01-25
+            // SOLUCIÓN: Este step convierte el formato de vuelta a D/M/YYYY.
+            // Conversiones: MM-DD-YY → D/M/YYYY (09-01-25 → 9/1/2025)
+            // Tablas: data_source_bascar (fecha_inicio_vig, fecha_finalizacion, fecha_expedicion)
+            //         data_source_dettra (fecha_ini_cobert, fech_nacim)
+            $this->normalizeDateFormatsStep,
+
+            // === FASE 3: FILTRADO DE DATOS POR PERIODO ===
+
+            // Paso 3: Filtrar datos por periodo del run
+            // - Si periodo = "Todos Los Periodos": No filtra nada
+            // - Si periodo = YYYYMM: Filtra BASCAR por FECHA_INICIO_VIG
+            //   IMPORTANTE: Las fechas DEBEN venir con año de 4 dígitos del Excel original (D/M/YYYY o DD/MM/YYYY)
+            //   El binario Go excel_to_csv respeta el formato original sin modificarlo
+            $this->filterDataByPeriodStep,
+
+            // === FASE 4: SANITIZACIÓN DE DATOS (DESPUÉS DE FILTRAR) ===
 
             // Paso 4: Sanitizar CIU_TOM (convertir nombres de ciudades a códigos)
             // Algunos registros tienen el NOMBRE de la ciudad en lugar del código DIVIPOLA
@@ -169,15 +188,17 @@ final class ConstitucionMoraAportantesProcessor extends BaseCollectionNoticeProc
             // - "MEDELLIN" → busca en city_depto.name_city
             // - Si encuentra 1 coincidencia → actualiza CIU_TOM = "05001"
             // - Si encuentra 0 o múltiples coincidencias → deja vacío (ambiguo)
+            // IMPORTANTE: Se ejecuta DESPUÉS del filtrado por periodo para procesar menos registros
             $this->sanitizeCiuTomStep,
 
-            // === FASE 3: FILTRADO DE DATOS POR PERIODO ===
-
-            // Paso 5: Filtrar datos por periodo del run
-            // - Si periodo = "Todos Los Periodos": No filtra nada
-            // - Si periodo = YYYYMM: Filtra BASCAR por FECHA_INICIO_VIG
-            //   (Las fechas ya vienen con año de 4 dígitos desde el binario Go)
-            $this->filterDataByPeriodStep,
+            // Paso 5: Sanitizar campos numéricos (formato europeo → estándar)
+            // Limpia campos numéricos que vienen con separadores europeos:
+            // - Entrada: "1.234.567,89" (punto = miles, coma = decimal)
+            // - Salida: "1234567.89" (sin separador de miles, punto = decimal)
+            // Procesa por chunks de 1000 registros en PHP para validación individual
+            // IMPORTANTE: Se ejecuta DESPUÉS del filtrado para procesar menos registros
+            // Actualmente sanitiza: BASCAR.valor_total_fact
+            $this->sanitizeNumericFieldsStep,
 
             // === FASE 4: TRANSFORMACIÓN Y CRUCE DE DATOS SQL ===
 

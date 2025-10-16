@@ -39,7 +39,16 @@ final class FilterDataByPeriodStep implements ProcessingStepInterface
 
         // Si periodo es "Todos Los Periodos", no filtrar nada
         if ($this->isAllPeriods($run->period)) {
-            Log::info('Filtrado de datos completado (todos los periodos)', ['run_id' => $run->id]);
+            $bascarTotal = DB::table('data_source_bascar')->where('run_id', $run->id)->count();
+            $pagaplTotal = DB::table('data_source_pagapl')->where('run_id', $run->id)->count();
+
+            Log::info('Filtrado de datos completado (todos los periodos - sin filtrar)', [
+                'run_id' => $run->id,
+                'periodo' => $run->period,
+                'bascar_registros' => $bascarTotal,
+                'pagapl_registros' => $pagaplTotal,
+                'mensaje' => 'No se eliminó ningún registro, se procesan todos los periodos',
+            ]);
             return;
         }
 
@@ -53,46 +62,49 @@ final class FilterDataByPeriodStep implements ProcessingStepInterface
         $this->filterBascarByPeriod($run);
         $this->filterPagaplBySheetName($run);
 
-        Log::info('Filtrado de datos completado', ['run_id' => $run->id, 'period' => $run->period]);
+        // Contar registros finales
+        $bascarFinal = DB::table('data_source_bascar')->where('run_id', $run->id)->count();
+        $pagaplFinal = DB::table('data_source_pagapl')->where('run_id', $run->id)->count();
+
+        Log::info('✅ Filtrado de datos completado exitosamente', [
+            'run_id' => $run->id,
+            'periodo' => $run->period,
+            'bascar_final' => $bascarFinal,
+            'pagapl_final' => $pagaplFinal,
+        ]);
     }
 
     /**
      * Filtra tabla BASCAR por periodo:
-     * 1. Extrae periodo de fecha_inicio_vig (DD/MM/YYYY, DD/MM/YY, o YYYY-MM-DD → YYYYMM)
+     * 1. Extrae periodo de fecha_inicio_vig (DD/MM/YYYY o D/M/YYYY → YYYYMM)
      * 2. Elimina registros que no correspondan al periodo del run
      *
+     * IMPORTANTE: Las fechas vienen normalizadas por NormalizeDateFormatsStep.
+     * El binario Go excel_to_csv convierte fechas de Excel a formato MM-DD-YY.
+     * NormalizeDateFormatsStep las convierte de vuelta a D/M/YYYY antes de este filtrado.
+     *
+     * Formatos soportados después de normalización:
+     * - DD/MM/YYYY (2 dígitos día, 2 dígitos mes, 4 dígitos año)
+     * - D/M/YYYY  (1-2 dígitos día, 1-2 dígitos mes, 4 dígitos año)
+     *
      * Nota: La columna 'periodo' ya fue creada por CreateBascarIndexesStep (paso 2)
-     * Nota: fecha_inicio_vig fue sanitizada previamente a formato YYYY-MM-DD por SanitizeDateFieldsStep (paso 4)
      */
     private function filterBascarByPeriod(CollectionNoticeRun $run): void
     {
         $tableName = 'data_source_bascar';
 
+        // Contar registros antes del filtrado
+        $totalBefore = DB::table($tableName)->where('run_id', $run->id)->count();
+
         // Extraer periodo de fecha_inicio_vig
-        // Maneja tres formatos:
-        // - DD/MM/YYYY (formato original del CSV con año de 4 dígitos)
-        // - DD/MM/YY (formato original del CSV con año de 2 dígitos)
-        // - YYYY-MM-DD (formato sanitizado por SanitizeDateFieldsStep)
-        DB::statement("
+        // Solo maneja formato DD/MM/YYYY o D/M/YYYY (año de 4 dígitos)
+        $updated = DB::statement("
             UPDATE {$tableName}
             SET periodo = CASE
-                -- Si es formato YYYY-MM-DD (sanitizado): extraer YYYYMM
-                WHEN fecha_inicio_vig ~ '^\d{4}-\d{2}-\d{2}$' THEN
-                    CONCAT(
-                        SUBSTRING(fecha_inicio_vig, 1, 4),
-                        SUBSTRING(fecha_inicio_vig, 6, 2)
-                    )
-                -- Si es formato DD/MM/YYYY (original con 4 dígitos de año): extraer YYYYMM
+                -- Formato D/M/YYYY o DD/MM/YYYY (1-2 dígitos día/mes, 4 dígitos año)
                 WHEN fecha_inicio_vig ~ '^[0-9]{1,2}/[0-9]{1,2}/[0-9]{4}$' THEN
                     CONCAT(
                         SPLIT_PART(fecha_inicio_vig, '/', 3),
-                        LPAD(SPLIT_PART(fecha_inicio_vig, '/', 2), 2, '0')
-                    )
-                -- Si es formato DD/MM/YY (original con 2 dígitos de año): extraer YYYYMM
-                -- Interpreta YY como 20YY (ejemplo: 25 → 2025)
-                WHEN fecha_inicio_vig ~ '^[0-9]{1,2}/[0-9]{1,2}/[0-9]{2}$' THEN
-                    CONCAT(
-                        '20' || SPLIT_PART(fecha_inicio_vig, '/', 3),
                         LPAD(SPLIT_PART(fecha_inicio_vig, '/', 2), 2, '0')
                     )
                 ELSE NULL
@@ -102,11 +114,38 @@ final class FilterDataByPeriodStep implements ProcessingStepInterface
             AND fecha_inicio_vig != ''
         ", [$run->id]);
 
+        // Contar registros que coinciden con el periodo
+        $matchingPeriod = DB::table($tableName)
+            ->where('run_id', $run->id)
+            ->where('periodo', $run->period)
+            ->count();
+
+        // Contar registros sin periodo (fechas inválidas)
+        $withoutPeriod = DB::table($tableName)
+            ->where('run_id', $run->id)
+            ->whereNull('periodo')
+            ->count();
+
         // Eliminar registros que no correspondan al periodo
-        DB::table($tableName)
+        $deleted = DB::table($tableName)
             ->where('run_id', $run->id)
             ->where('periodo', '!=', $run->period)
             ->delete();
+
+        $totalAfter = DB::table($tableName)->where('run_id', $run->id)->count();
+
+        Log::info('Filtrado de BASCAR por periodo', [
+            'run_id' => $run->id,
+            'periodo_buscado' => $run->period,
+            'total_antes' => $totalBefore,
+            'coinciden_periodo' => $matchingPeriod,
+            'sin_periodo_valido' => $withoutPeriod,
+            'eliminados' => $deleted,
+            'total_despues' => $totalAfter,
+            'porcentaje_conservado' => $totalBefore > 0
+                ? round(($totalAfter / $totalBefore) * 100, 2) . '%'
+                : '0%',
+        ]);
     }
 
     /**
@@ -125,11 +164,52 @@ final class FilterDataByPeriodStep implements ProcessingStepInterface
         $tableName = 'data_source_pagapl';
         $targetYear = substr($run->period, 0, 4);
 
+        // Contar registros antes del filtrado
+        $totalBefore = DB::table($tableName)->where('run_id', $run->id)->count();
+
+        // Contar registros que contienen el año buscado
+        $matching = DB::table($tableName)
+            ->where('run_id', $run->id)
+            ->where('sheet_name', 'LIKE', "%{$targetYear}%")
+            ->count();
+
+        // Obtener nombres únicos de hojas antes del filtrado
+        $sheetsBefore = DB::table($tableName)
+            ->where('run_id', $run->id)
+            ->distinct()
+            ->pluck('sheet_name')
+            ->toArray();
+
         // Eliminar registros donde sheet_name NO contenga el año
-        DB::table($tableName)
+        $deleted = DB::table($tableName)
             ->where('run_id', $run->id)
             ->where('sheet_name', 'NOT LIKE', "%{$targetYear}%")
             ->delete();
+
+        $totalAfter = DB::table($tableName)->where('run_id', $run->id)->count();
+
+        // Obtener nombres únicos de hojas después del filtrado
+        $sheetsAfter = DB::table($tableName)
+            ->where('run_id', $run->id)
+            ->distinct()
+            ->pluck('sheet_name')
+            ->toArray();
+
+        Log::info('Filtrado de PAGAPL por año', [
+            'run_id' => $run->id,
+            'periodo_buscado' => $run->period,
+            'año_buscado' => $targetYear,
+            'total_antes' => $totalBefore,
+            'coinciden_año' => $matching,
+            'eliminados' => $deleted,
+            'total_despues' => $totalAfter,
+            'hojas_antes' => $sheetsBefore,
+            'hojas_despues' => $sheetsAfter,
+            'hojas_eliminadas' => array_diff($sheetsBefore, $sheetsAfter),
+            'porcentaje_conservado' => $totalBefore > 0
+                ? round(($totalAfter / $totalBefore) * 100, 2) . '%'
+                : '0%',
+        ]);
     }
 
     /**

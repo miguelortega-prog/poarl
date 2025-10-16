@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"time"
 
 	"github.com/xuri/excelize/v2"
@@ -29,38 +28,6 @@ type Result struct {
 	TotalRows int           `json:"total_rows"`
 	TotalTime int           `json:"total_time_ms"`
 	Error     string        `json:"error,omitempty"`
-}
-
-// fixTwoDigitYearDates convierte fechas con año de 2 dígitos a 4 dígitos
-// Usa regex para detectar patrones de fecha y corregirlos
-// Soporta formatos: DD-MM-YY, DD/MM/YY, D-M-YY, D/M/YY
-func fixTwoDigitYearDates(row []string) []string {
-	result := make([]string, len(row))
-
-	// Regex para detectar fechas con año de 2 dígitos
-	// Captura: (día)-(separador)-(mes)-(separador)-(año de 2 dígitos)
-	// Acepta cualquier separador (- o /)
-	datePattern := regexp.MustCompile(`^(\d{1,2})([-/])(\d{1,2})([-/])(\d{2})$`)
-
-	for i, value := range row {
-		matches := datePattern.FindStringSubmatch(value)
-		if len(matches) == 6 {
-			day := matches[1]
-			month := matches[3]
-			year := matches[5]
-
-			// Convertir año de 2 dígitos a 4 dígitos
-			// Asumimos que 00-99 son 2000-2099
-			fullYear := "20" + year
-
-			// Reconstruir fecha con año de 4 dígitos y slash como separador
-			result[i] = day + "/" + month + "/" + fullYear
-		} else {
-			result[i] = value
-		}
-	}
-
-	return result
 }
 
 func main() {
@@ -114,7 +81,9 @@ func main() {
 		writer := csv.NewWriter(csvFile)
 		writer.Comma = rune((*delimiter)[0])
 
-		rows, err := f.Rows(sheetName)
+		// IMPORTANTE: Usar GetRows() con opción RawCellValue para NO formatear fechas automáticamente
+		// Esto preserva el texto tal como se muestra en Excel
+		rows, err := f.GetRows(sheetName, excelize.Options{RawCellValue: true})
 		if err != nil {
 			csvFile.Close()
 			result.Success = false
@@ -125,22 +94,17 @@ func main() {
 
 		rowCount := 0
 
-		for rows.Next() {
-			row, err := rows.Columns()
-			if err != nil {
-				continue
-			}
-
+		for rowIndex, row := range rows {
 			rowCount++
 
 			// Para todas las filas (incluyendo header), agregar columna sheet_name
-			if rowCount == 1 {
+			if rowIndex == 0 {
 				// Primera fila es el header
 				row = append(row, "sheet_name")
 			} else {
-				// Para filas de datos, corregir fechas con año de 2 dígitos
-				row = fixTwoDigitYearDates(row)
-				// Agregar valor de sheet_name a las filas de datos
+				// Para filas de datos, agregar valor de sheet_name
+				// IMPORTANTE: RawCellValue: true lee los valores sin aplicar formato
+				// Las fechas se mantienen como texto visible en Excel (6/01/2024)
 				row = append(row, sheetName)
 			}
 
@@ -151,14 +115,6 @@ func main() {
 				outputJSON(result)
 				os.Exit(1)
 			}
-		}
-
-		if err := rows.Close(); err != nil {
-			csvFile.Close()
-			result.Success = false
-			result.Error = fmt.Sprintf("Error closing rows iterator: %v", err)
-			outputJSON(result)
-			os.Exit(1)
 		}
 
 		writer.Flush()

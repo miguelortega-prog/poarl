@@ -8,6 +8,7 @@ use App\Models\CollectionNoticeRun;
 use App\Services\Recaudo\Comunicados\BaseCollectionNoticeProcessor;
 use App\Services\Recaudo\DataSourceTableManager;
 use App\UseCases\Recaudo\Comunicados\Steps\AddCityCodeToDettraStep;
+use App\UseCases\Recaudo\Comunicados\Steps\AddCityNamesToDettraStep;
 use App\UseCases\Recaudo\Comunicados\Steps\AddEmailAndAddressFromPagplaStep;
 use App\UseCases\Recaudo\Comunicados\Steps\AddEmailAndAddressToDettraStep;
 use App\UseCases\Recaudo\Comunicados\Steps\AddNamesToDettraFromBasactStep;
@@ -22,10 +23,10 @@ use App\UseCases\Recaudo\Comunicados\Steps\ExportAndRemoveDettraWithoutContactDa
 use App\UseCases\Recaudo\Comunicados\Steps\ExportAndRemoveDettraWithoutNamesStep;
 use App\UseCases\Recaudo\Comunicados\Steps\ExportDettraToExcelStep;
 use App\UseCases\Recaudo\Comunicados\Steps\ExportExcludedDettraRecordsStep;
-use App\UseCases\Recaudo\Comunicados\Steps\FilterDataSourcesByPeriodStep;
 use App\UseCases\Recaudo\Comunicados\Steps\RemoveCrossedDettraRecordsStep;
 use App\UseCases\Recaudo\Comunicados\Steps\FilterDettraByTipoCotizanteStep;
 use App\UseCases\Recaudo\Comunicados\Steps\DefineTipoDeEnvioDettraStep;
+use App\UseCases\Recaudo\Comunicados\Steps\SanitizeBasactFieldsStep;
 use App\UseCases\Recaudo\Comunicados\Steps\SanitizeTipoDocFieldStep;
 use App\UseCases\Recaudo\Comunicados\Steps\GenerateConsecutivosStep;
 use App\UseCases\Recaudo\Comunicados\Steps\MarkRunAsCompletedStep;
@@ -38,10 +39,10 @@ use Illuminate\Contracts\Filesystem\Factory as FilesystemFactory;
  *
  * Pipeline:
  * 1. Filtrar DETTRA por tipo_cotizante y riesgo (independientes válidos)
- * 2. Filtrar PAGAPL y PAGLOG por periodo del run (optimización)
- * 3. Crear columnas e índices en DETTRA (composite_key, cruces, observaciones, nombres, codigo_ciudad, correo, direccion)
- * 4. Crear columnas e índices en PAGAPL (composite_key)
- * 5. Crear columnas e índices en PAGLOG (nit_periodo, composite_key_dv)
+ * 2. Crear columnas e índices en DETTRA (composite_key, cruces, observaciones, nombres, codigo_ciudad, correo, direccion)
+ * 3. Crear columnas e índices en PAGAPL (composite_key)
+ * 4. Crear columnas e índices en PAGLOG (nit_periodo, composite_key_dv)
+ * 5. Sanitizar campos de BASACT (identificación, correo, nombres, dirección)
  * 6. Cruzar DETTRA con PAGAPL (identificar pagos aplicados)
  * 7. Cruzar DETTRA con PAGLOG sin DV (identificar pagos en log bancario)
  * 8. Cruzar DETTRA con PAGLOG con DV (identificar pagos en log bancario - alternativo)
@@ -56,9 +57,10 @@ use Illuminate\Contracts\Filesystem\Factory as FilesystemFactory;
  * 17. Definir tipo de envío (CORREO o FISICO)
  * 18. Sanitizar campo tipo_doc (C→CC, E→CE, F→PE, T→TI)
  * 19. Generar consecutivos únicos para cada comunicado
- * 20. Exportar DETTRA a Excel 97 (2 hojas: Independientes y Trabajadores Expuestos)
- * 21. Marcar run como completado
- * 22. Limpiar datos de data sources
+ * 20. Agregar nombres de ciudades desde city_depto
+ * 21. Exportar DETTRA a Excel 97 (2 hojas: Independientes y Trabajadores Expuestos)
+ * 22. Marcar run como completado
+ * 23. Limpiar datos de data sources
  *
  * Data sources requeridos:
  * - BASACT: Base de activos (trabajadores independientes)
@@ -72,10 +74,10 @@ final class ConstitucionMoraIndependientesProcessor extends BaseCollectionNotice
         DataSourceTableManager $tableManager,
         FilesystemFactory $filesystem,
         private readonly FilterDettraByTipoCotizanteStep $filterDettraByTipoCotizanteStep,
-        private readonly FilterDataSourcesByPeriodStep $filterDataSourcesByPeriodStep,
         private readonly CreateDettraIndexesStep $createDettraIndexesStep,
         private readonly CreatePagaplIndexesStep $createPagaplIndexesStep,
         private readonly CreatePaglogIndexesStep $createPaglogIndexesStep,
+        private readonly SanitizeBasactFieldsStep $sanitizeBasactFieldsStep,
         private readonly CrossDettraWithPagaplStep $crossDettraWithPagaplStep,
         private readonly CrossDettraWithPaglogStep $crossDettraWithPaglogStep,
         private readonly CrossDettraWithPaglogDvStep $crossDettraWithPaglogDvStep,
@@ -84,6 +86,7 @@ final class ConstitucionMoraIndependientesProcessor extends BaseCollectionNotice
         private readonly AddNamesToDettraFromBasactStep $addNamesToDettraFromBasactStep,
         private readonly ExportAndRemoveDettraWithoutNamesStep $exportAndRemoveDettraWithoutNamesStep,
         private readonly AddCityCodeToDettraStep $addCityCodeToDettraStep,
+        private readonly AddCityNamesToDettraStep $addCityNamesToDettraStep,
         private readonly AddEmailAndAddressToDettraStep $addEmailAndAddressToDettraStep,
         private readonly AddEmailAndAddressFromPagplaStep $addEmailAndAddressFromPagplaStep,
         private readonly ExportAndRemoveDettraWithoutContactDataStep $exportAndRemoveDettraWithoutContactDataStep,
@@ -139,10 +142,10 @@ final class ConstitucionMoraIndependientesProcessor extends BaseCollectionNotice
      *
      * Este procesador implementa cruces para identificar pagos:
      * - PASO 1: Filtrar DETTRA por tipo_cotizante y riesgo
-     * - PASO 2: Filtrar PAGAPL y PAGLOG por periodo del run (optimización)
-     * - PASO 3: Crear columnas e índices en DETTRA (composite_key, cruces, observaciones, nombres, codigo_ciudad, correo, direccion)
-     * - PASO 4: Crear columnas e índices en PAGAPL (composite_key)
-     * - PASO 5: Crear columnas e índices en PAGLOG (nit_periodo, composite_key_dv)
+     * - PASO 2: Crear columnas e índices en DETTRA (composite_key, cruces, observaciones, nombres, codigo_ciudad, correo, direccion)
+     * - PASO 3: Crear columnas e índices en PAGAPL (composite_key)
+     * - PASO 4: Crear columnas e índices en PAGLOG (nit_periodo, composite_key_dv)
+     * - PASO 5: Sanitizar campos de BASACT (identificación, correo, nombres, dirección)
      * - PASO 6: Cruzar DETTRA con PAGAPL (identificar pagos aplicados)
      * - PASO 7: Cruzar DETTRA con PAGLOG sin DV (identificar pagos en log bancario)
      * - PASO 8: Cruzar DETTRA con PAGLOG con DV (identificar pagos en log bancario - alternativo)
@@ -157,9 +160,10 @@ final class ConstitucionMoraIndependientesProcessor extends BaseCollectionNotice
      * - PASO 17: Definir tipo de envío (CORREO o FISICO)
      * - PASO 18: Sanitizar campo tipo_doc
      * - PASO 19: Generar consecutivos únicos
-     * - PASO 20: Exportar DETTRA a Excel 97
-     * - PASO 21: Marcar run como completado
-     * - PASO 22: Limpiar datos de data sources
+     * - PASO 20: Agregar nombres de ciudades desde city_depto
+     * - PASO 21: Exportar DETTRA a Excel 97
+     * - PASO 22: Marcar run como completado
+     * - PASO 23: Limpiar datos de data sources
      *
      * @return array<int, \App\Contracts\Recaudo\Comunicados\ProcessingStepInterface>
      */
@@ -173,30 +177,30 @@ final class ConstitucionMoraIndependientesProcessor extends BaseCollectionNotice
             // Elimina el resto de registros de DETTRA
             $this->filterDettraByTipoCotizanteStep,
 
-            // Paso 2: Filtrar PAGAPL y PAGLOG por periodo del run
-            // Optimización: Elimina registros con periodo diferente al del run
-            // ya que estos nunca cruzarán en los pasos posteriores
-            // Mejora performance y reduce volumen de datos
-            $this->filterDataSourcesByPeriodStep,
-
-            // Paso 3: Preparar estructura de DETTRA (columnas e índices)
+            // Paso 2: Preparar estructura de DETTRA (columnas e índices)
             // Crea columnas: composite_key, cruce_pagapl, cruce_paglog, cruce_paglog_dv, observacion_trabajadores, nombres, codigo_ciudad, correo, direccion
             // Crea índices: idx_dettra_run_id, idx_dettra_nit, idx_dettra_composite_key, etc.
             // Genera composite_key = NIT + periodo del run
             $this->createDettraIndexesStep,
 
-            // Paso 4: Preparar estructura de PAGAPL (columnas e índices)
+            // Paso 3: Preparar estructura de PAGAPL (columnas e índices)
             // Crea columna: composite_key
             // Crea índices: idx_pagapl_run_id, idx_pagapl_identifi, idx_pagapl_composite_key
             // Genera composite_key = Identifi + Periodo (de la tabla PAGAPL)
             $this->createPagaplIndexesStep,
 
-            // Paso 5: Preparar estructura de PAGLOG (columnas e índices)
+            // Paso 4: Preparar estructura de PAGLOG (columnas e índices)
             // Crea columnas: nit_periodo, composite_key_dv
             // Crea índices: idx_paglog_run_id, idx_paglog_nit_empresa, etc.
             // Genera nit_periodo = NIT_EMPRESA + PERIODO_PAGO (sin DV)
             // Genera composite_key_dv = NIT_con_DV + PERIODO_PAGO (con DV calculado)
             $this->createPaglogIndexesStep,
+
+            // Paso 5: Sanitizar campos de BASACT (identificación, correo, nombres, dirección)
+            // Elimina TODOS los espacios de: identificacion_trabajador, correo_trabajador
+            // Normaliza espacios en: nombres, apellidos, dirección (elimina espacios múltiples)
+            // Mejora cruces con DETTRA eliminando espacios que causan fallos en los JOINS
+            $this->sanitizeBasactFieldsStep,
 
             // Paso 6: Cruzar DETTRA con PAGAPL
             // Busca DETTRA.composite_key en PAGAPL.composite_key
@@ -284,19 +288,25 @@ final class ConstitucionMoraIndependientesProcessor extends BaseCollectionNotice
             // Serial ascendente de 5 dígitos (00001 hasta 99999)
             $this->generateConsecutivosStep,
 
-            // Paso 20: Exportar DETTRA a Excel 97 (.xls)
+            // Paso 20: Agregar nombres de ciudades desde city_depto
+            // Cruza DETTRA.codigo_ciudad con city_depto (depto_code + city_code)
+            // Actualiza DETTRA.nombre_ciudad con name_city
+            // Ejemplo: codigo_ciudad "05001" → nombre_ciudad "MEDELLÍN"
+            $this->addCityNamesToDettraStep,
+
+            // Paso 21: Exportar DETTRA a Excel 97 (.xls)
             // Genera archivo con 2 hojas:
             // - Hoja 1 (Independientes): Datos del trabajador con cálculo de valor por tasa de riesgo
             // - Hoja 2 (Trabajadores Expuestos): Detalle con riesgo en números romanos
             // Nombre: Constitucion_en_mora_independientes_{periodo}.xls
             $this->exportDettraToExcelStep,
 
-            // Paso 21: Marcar run como completado
+            // Paso 22: Marcar run como completado
             // Cambia el estado del run a 'completed'
             // Registra la duración total del procesamiento
             $this->markRunAsCompletedStep,
 
-            // Paso 22: Limpiar datos de tablas data_source_
+            // Paso 23: Limpiar datos de tablas data_source_
             // Elimina todos los registros de data_source_* para este run_id
             // para liberar espacio en disco después del procesamiento exitoso
             $this->cleanupDataSourcesStep,
